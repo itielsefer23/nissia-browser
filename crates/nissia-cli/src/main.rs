@@ -199,6 +199,25 @@ enum Commands {
     /// Start an MCP server exposing nissia tools over JSON-RPC (stdio)
     Mcp,
 
+    /// (Optional turbo, opt-in) Autonomous agent: drives the browser with a cheap
+    /// internal LLM and prints ONLY the final answer. Needs an API key
+    /// (NISSIA_AGENT_API_KEY); the navigate/search/batch modes need no key.
+    Agent {
+        /// Goal in natural language
+        goal: String,
+        /// Optional starting URL
+        #[arg(long)]
+        url: Option<String>,
+        /// Max reasoning steps
+        #[arg(long)]
+        max_steps: Option<usize>,
+    },
+
+    /// Run a sequence of steps from stdin on ONE connection (fast: a whole flow in
+    /// one process / one round trip). One verb per line:
+    /// goto/snap/read/eval/click/fill/type/select/scroll/wait.
+    Batch,
+
     /// Cheap web search (no API key required by default); prints compact results.
     Search {
         /// Search query
@@ -597,6 +616,25 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         },
         Commands::Mcp => {
             cmd::mcp::run(cli.port).await?;
+        }
+        Commands::Agent {
+            goal,
+            url,
+            max_steps,
+        } => {
+            cmd::agent::run(
+                cli.port,
+                &goal,
+                url.as_deref(),
+                max_steps,
+                &cli.lang,
+                &emu,
+                cli.verbose,
+            )
+            .await?;
+        }
+        Commands::Batch => {
+            cmd::batch::run(cli.port, &cli.lang, &emu).await?;
         }
         Commands::Search { query, n, read } => {
             cmd::search::run(cli.port, &query, n, read, fmt, &cli.lang, &emu).await?;

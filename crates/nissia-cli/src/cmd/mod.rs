@@ -1,4 +1,6 @@
 pub mod action;
+pub mod agent;
+pub mod batch;
 pub mod browser;
 pub mod mcp;
 pub mod read;
