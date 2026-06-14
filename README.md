@@ -1,6 +1,6 @@
 <p align="center">
   <strong>nissia browser</strong><br>
-  <em>The token-cheap browser CLI for AI agents — snap + act + autonomous agent</em>
+  <em>The token-cheap browser CLI for AI agents</em>
 </p>
 
 <p align="center">
@@ -10,13 +10,13 @@
 
 ---
 
-**nissia browser** lets AI agents (Claude Code, Cursor, Codex, Continue, Windsurf, …)
-drive a real browser while spending as **few tokens as possible**. It is a CLI, not an
-MCP server, on purpose: you get back exactly what you print and nothing lingers in the
-model's context.
+**nissia browser** lets an AI agent (Claude Code, Cursor, Codex, Continue, Windsurf, ...)
+drive a real browser while spending as **few tokens as possible**.
 
-One `snap` returns page structure, section content, and every actionable element with
-compact `@eN` refs — enough to understand and act in a single turn.
+The agent is the brain. nissia is the cheap eyes and hands. There is **no internal LLM
+and no API key**: your agent decides what to do, and nissia executes it with the smallest
+possible output coming back into the agent's context. It is a CLI, not an MCP server, on
+purpose: you get back exactly what you print, and nothing lingers in context.
 
 ```
 $ nissia snap https://github.com/login --focus form
@@ -25,69 +25,62 @@ $ nissia snap https://github.com/login --focus form
 @e2 [textbox] "Password"
 @e3 [button] "Sign in"
 
-$ nissia fill @e1 "octocat"
+$ nissia fill @e1 "octocat" --no-snap
 $ nissia fill @e2 "hunter2" --no-snap
 $ nissia click @e3
 ```
 
-## Why nissia
+## Two ways to use it
 
-- **Token-economic by design.** `--focus`, `--no-snap`, screenshots to file, and an
-  autonomous agent mode that keeps navigation cost off the caller. See
-  [docs/TOKEN-ECONOMY.md](docs/TOKEN-ECONOMY.md).
-- **Autonomous agent.** `nissia agent "<goal>"` drives the browser with a cheap internal
-  model and prints only the final answer.
-- **Cheap search.** `nissia search "<query>"` over plain HTTP — no headless fingerprint.
-- **Fast native Rust** over the Chrome DevTools Protocol. No Playwright/Puppeteer.
-- **Sessions & record/replay.** Persist logins; replay flows at zero LLM cost.
+1. **Navigate** (your agent drives): `snap` / `read` / `eval` / `click` / `fill` / `type`
+   / `scroll`, with the cheap defaults below. No key, no internal model.
+2. **Search** (built in): `nissia search "<query>"` returns a compact list of results
+   over plain HTTP. No API key required.
+
+## Why nissia is cheap
+
+| Leak | Typical cost | How nissia cuts it |
+|------|--------------|--------------------|
+| full-page `snap` | 2,000-4,000 tokens | always pass `--focus`; prefer `read` / `eval` |
+| auto re-snap after every action | 2-4k per action | act with `--no-snap`; observe only when needed |
+| base64 screenshots into context | huge | `screenshot --file out.png` returns a path, not bytes |
+
+More detail: [docs/TOKEN-ECONOMY.md](docs/TOKEN-ECONOMY.md).
 
 ## Install
 
 ```bash
-# from source (requires the Rust toolchain)
 git clone https://github.com/OWNER/nissia-browser.git
 cd nissia-browser
-cargo install --path crates/nissia-cli
-# this installs the `nissia` binary
+cargo install --path crates/nissia-cli   # installs the `nissia` binary
 ```
 
 ## Quickstart
 
 ```bash
-nissia browser launch --headless --background   # start Chrome (isolated, persistent profile)
-nissia snap https://example.com                 # structure + @eN refs
-nissia read --focus main                        # page text as markdown
-nissia eval "document.title"                    # run JS, extract data
-nissia click @e1                                # act (add --no-snap to stay cheap)
+nissia browser launch --headless --background   # isolated, persistent profile
+nissia snap https://example.com --focus main    # structure + @eN refs (focused = cheap)
+nissia read --focus main                         # page text as markdown
+nissia eval "document.title"                     # run JS, extract exactly what you need
+nissia click @e1 --no-snap                       # act without paying for a re-snap
 nissia browser stop
 ```
 
-> Tip: if you already have a normal Chrome open, prefer `--headless` — a visible launch
-> can hand off to the existing instance and never open the debug port.
+> If you already have a normal Chrome open, prefer `--headless`: a visible launch can
+> hand off to the existing instance and never open the debug port.
 
-## Autonomous agent
-
-Give it a goal; it navigates on its own and prints only the answer. The caller spends
-~0 tokens on the in-between pages.
+## Search (no API key)
 
 ```bash
-export NISSIA_AGENT_API_KEY=...                 # or OPENROUTER_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
-export NISSIA_AGENT_PROVIDER=openai             # openai-compatible | anthropic
-export NISSIA_AGENT_BASE_URL=https://openrouter.ai/api/v1
-export NISSIA_AGENT_MODEL=openai/gpt-4o-mini    # use something cheap
-
-nissia agent "what is the latest stable Rust version?" --url https://www.rust-lang.org
+nissia search "anthropic claude code" --n 5      # default backend: Mojeek (no key)
+nissia search "rust async runtime" --read        # also read the top result
 ```
 
-## Search
+Want higher-volume or Google-grade results? Optionally set an API key:
 
 ```bash
-nissia search "anthropic claude" --n 5          # free DuckDuckGo Instant Answer (no key)
-nissia search "rust async runtime" --read       # also read the top result
-
-# real web results (optional):
 export NISSIA_SEARCH_API_KEY=...
-export NISSIA_SEARCH_PROVIDER=brave             # brave | serper | tavily
+export NISSIA_SEARCH_PROVIDER=brave              # brave | serper | tavily
 ```
 
 ## Token-economy helpers
@@ -104,17 +97,17 @@ binary with the cheap defaults baked in: `peek` (focused read), `grab` (eval),
 ## Commands
 
 `snap` `read` `eval` `click` `fill` `type` `select` `scroll` `screenshot` `wait`
-`agent` `search` `session` `record` `replay` `browser` `schema` `mcp` `init`
+`search` `session` `record` `replay` `browser` `schema` `mcp` `init`
 
 Run `nissia --help` or `nissia schema [command]` for details.
 
 ## Credits
 
-nissia browser is a fork of [**snact**](https://github.com/vericontext/snact) by
-Kiyeon Jeon, which provides the excellent CDP core and the compact snapshot
-compressor. nissia adds the autonomous `agent` mode, HTTP `search`, token-economy
-wrappers, and a headless-first workflow. Huge thanks to the original author.
+nissia browser is built on the Chrome DevTools Protocol core and snapshot compressor from
+the MIT-licensed **snact** project by Kiyeon Jeon. nissia reshapes it into its own tool
+with a built-in no-key `search`, token-economy wrappers, and a headless-first workflow.
+The MIT license (see [LICENSE](LICENSE)) requires keeping that original credit.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Original copyright retained for the upstream project.
+MIT, see [LICENSE](LICENSE).

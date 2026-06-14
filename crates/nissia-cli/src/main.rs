@@ -199,20 +199,7 @@ enum Commands {
     /// Start an MCP server exposing nissia tools over JSON-RPC (stdio)
     Mcp,
 
-    /// Autonomous agent: give it a GOAL and it drives the browser with a cheap
-    /// internal LLM, printing ONLY the final answer (the caller spends ~0 tokens).
-    Agent {
-        /// Goal in natural language
-        goal: String,
-        /// Optional starting URL
-        #[arg(long)]
-        url: Option<String>,
-        /// Max reasoning steps (default 12 or NISSIA_AGENT_MAX_STEPS)
-        #[arg(long)]
-        max_steps: Option<usize>,
-    },
-
-    /// Cheap web search via the browser (DuckDuckGo); prints compact results.
+    /// Cheap web search (no API key required by default); prints compact results.
     Search {
         /// Search query
         query: String,
@@ -610,22 +597,6 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         },
         Commands::Mcp => {
             cmd::mcp::run(cli.port).await?;
-        }
-        Commands::Agent {
-            goal,
-            url,
-            max_steps,
-        } => {
-            cmd::agent::run(
-                cli.port,
-                &goal,
-                url.as_deref(),
-                max_steps,
-                &cli.lang,
-                &emu,
-                cli.verbose,
-            )
-            .await?;
         }
         Commands::Search { query, n, read } => {
             cmd::search::run(cli.port, &query, n, read, fmt, &cli.lang, &emu).await?;

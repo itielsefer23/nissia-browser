@@ -1,14 +1,11 @@
-//! `nissia search` — cheap web search over plain HTTP (no browser, no headless
-//! fingerprint, no SERP dumped into context).
+//! `nissia search` — the tool's OWN web search. No API key required by default.
 //!
-//! Backends (auto-selected):
-//!   * default, NO key:  DuckDuckGo Instant Answer API — always works, great for
-//!                        quick facts / disambiguation (not full web ranking).
-//!   * with an API key:  real web results. Set NISSIA_SEARCH_API_KEY and optionally
-//!                        NISSIA_SEARCH_PROVIDER = brave | serper | tavily.
+//! Default backend: Mojeek over plain HTTP (no key, scrape-tolerant, no headless
+//! fingerprint). So the calling agent (e.g. Claude Code) never has to navigate to
+//! Google itself, and never needs an external LLM/API to search.
 //!
-//! For deep, real web research prefer `nissia agent "<goal>"` (it navigates with a
-//! cheap internal model and returns only the answer).
+//! Optional API backends for higher volume/quality: set NISSIA_SEARCH_API_KEY and
+//! NISSIA_SEARCH_PROVIDER = brave | serper | tavily.
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -21,6 +18,10 @@ struct Hit {
     url: String,
     snippet: String,
 }
+
+const UA: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+     Chrome/124.0.0.0 Safari/537.36";
 
 pub async fn run(
     port: u16,
@@ -53,29 +54,17 @@ pub async fn run(
     if read_top {
         if let Some(top) = hits.iter().find(|h| !h.url.is_empty()) {
             println!("\n--- TOP RESULT: {} ---", top.url);
-            super::agent::ensure_browser(port).await?;
+            super::ensure_browser(port).await?;
             let transport = nissia_cdp::connect(port).await?;
-            let r = nissia_core::read::execute(
-                &transport,
-                Some(&top.url),
-                Some("main"),
-                lang,
-                120,
-                emu,
-            )
-            .await;
+            let r =
+                nissia_core::read::execute(&transport, Some(&top.url), Some("main"), lang, 120, emu)
+                    .await;
             match r {
                 Ok(r) => println!("{}", r.output),
                 Err(_) => {
-                    let r = nissia_core::read::execute(
-                        &transport,
-                        Some(&top.url),
-                        None,
-                        lang,
-                        120,
-                        emu,
-                    )
-                    .await?;
+                    let r =
+                        nissia_core::read::execute(&transport, Some(&top.url), None, lang, 120, emu)
+                            .await?;
                     println!("{}", r.output);
                 }
             }
@@ -91,12 +80,12 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
         if key.is_some() {
             "brave".to_string()
         } else {
-            "ddg".to_string()
+            "mojeek".to_string()
         }
     });
 
     match provider.as_str() {
-        "ddg" => ddg_instant(client, query, n).await,
+        "mojeek" => mojeek(client, query, n).await,
         "brave" => {
             let k = key.context("NISSIA_SEARCH_API_KEY required for brave")?;
             brave(client, query, n, &k).await
@@ -109,62 +98,98 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
             let k = key.context("NISSIA_SEARCH_API_KEY required for tavily")?;
             tavily(client, query, n, &k).await
         }
-        other => bail!("unknown NISSIA_SEARCH_PROVIDER '{other}' (use: ddg | brave | serper | tavily)"),
+        other => bail!(
+            "unknown NISSIA_SEARCH_PROVIDER '{other}' (use: mojeek | brave | serper | tavily)"
+        ),
     }
 }
 
-fn collect_topics(arr: &[Value], out: &mut Vec<Hit>) {
-    for it in arr {
-        if let Some(sub) = it["Topics"].as_array() {
-            collect_topics(sub, out);
+fn decode_entities(s: &str) -> String {
+    let named = s
+        .replace("&amp;", "&")
+        .replace("&apos;", "'")
+        .replace("&rsquo;", "'")
+        .replace("&lsquo;", "'")
+        .replace("&quot;", "\"")
+        .replace("&ldquo;", "\"")
+        .replace("&rdquo;", "\"")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&raquo;", ">>")
+        .replace("&rsaquo;", ">")
+        .replace("&mdash;", "-")
+        .replace("&ndash;", "-")
+        .replace("&hellip;", "...");
+    // Numeric entities: &#NN; and &#xHH;. Map fancy quotes/dashes to ASCII.
+    let re = regex::Regex::new(r"&#(x?)([0-9A-Fa-f]+);").unwrap();
+    re.replace_all(&named, |c: &regex::Captures| {
+        let cp = if &c[1] == "x" {
+            u32::from_str_radix(&c[2], 16).unwrap_or(0)
         } else {
-            let text = it["Text"].as_str().unwrap_or("");
-            let url = it["FirstURL"].as_str().unwrap_or("");
-            if !text.is_empty() {
-                out.push(Hit {
-                    title: text.chars().take(80).collect(),
-                    url: url.to_string(),
-                    snippet: text.to_string(),
+            c[2].parse::<u32>().unwrap_or(0)
+        };
+        match cp {
+            39 | 8216 | 8217 | 8218 | 8242 => "'".to_string(),
+            34 | 8220 | 8221 | 8243 => "\"".to_string(),
+            8208 | 8209 | 8211 | 8212 => "-".to_string(),
+            160 => " ".to_string(),
+            8230 => "...".to_string(),
+            _ => char::from_u32(cp).map(|ch| ch.to_string()).unwrap_or_default(),
+        }
+    })
+    .into_owned()
+}
+
+/// Parse Mojeek's result HTML (stable, simple markup: li.rN > a.title + p.s).
+fn parse_mojeek(html: &str, n: usize) -> Vec<Hit> {
+    let tag_re = regex::Regex::new(r"<[^>]+>").unwrap();
+    let title_re =
+        regex::Regex::new(r#"(?s)<a class="title"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#).unwrap();
+    let snip_re = regex::Regex::new(r#"(?s)<p class="s">(.*?)</p>"#).unwrap();
+
+    let clean = |s: &str| -> String {
+        let t = tag_re.replace_all(s, "");
+        decode_entities(t.trim())
+    };
+
+    let mut hits = Vec::new();
+    for block in html.split("<li class=\"r").skip(1) {
+        if let Some(c) = title_re.captures(block) {
+            let url = decode_entities(c.get(1).map(|m| m.as_str()).unwrap_or("").trim());
+            let title = clean(c.get(2).map(|m| m.as_str()).unwrap_or(""));
+            let snippet = snip_re
+                .captures(block)
+                .map(|s| clean(s.get(1).map(|m| m.as_str()).unwrap_or("")))
+                .unwrap_or_default();
+            if !title.is_empty() {
+                hits.push(Hit {
+                    title,
+                    url,
+                    snippet,
                 });
+            }
+            if hits.len() >= n {
+                break;
             }
         }
     }
+    hits
 }
 
-async fn ddg_instant(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hit>> {
-    let url = reqwest::Url::parse_with_params(
-        "https://api.duckduckgo.com/",
-        &[
-            ("q", query),
-            ("format", "json"),
-            ("no_html", "1"),
-            ("skip_disambig", "1"),
-        ],
-    )?;
-    let v: Value = client
+async fn mojeek(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hit>> {
+    let url = reqwest::Url::parse_with_params("https://www.mojeek.com/search", &[("q", query)])?;
+    let html = client
         .get(url)
-        .header("User-Agent", "nissia-browser")
+        .header("User-Agent", UA)
+        .header("Accept-Language", "en-US,en;q=0.9")
         .send()
         .await
-        .context("DuckDuckGo request failed")?
-        .json()
+        .context("Mojeek request failed")?
+        .text()
         .await
-        .context("DuckDuckGo response was not JSON")?;
-
-    let mut hits = Vec::new();
-    let abstract_text = v["AbstractText"].as_str().unwrap_or("");
-    if !abstract_text.is_empty() {
-        hits.push(Hit {
-            title: v["Heading"].as_str().unwrap_or("").to_string(),
-            url: v["AbstractURL"].as_str().unwrap_or("").to_string(),
-            snippet: abstract_text.to_string(),
-        });
-    }
-    if let Some(rt) = v["RelatedTopics"].as_array() {
-        collect_topics(rt, &mut hits);
-    }
-    hits.truncate(n);
-    Ok(hits)
+        .context("Mojeek response read failed")?;
+    Ok(parse_mojeek(&html, n))
 }
 
 async fn brave(client: &reqwest::Client, query: &str, n: usize, key: &str) -> Result<Vec<Hit>> {
