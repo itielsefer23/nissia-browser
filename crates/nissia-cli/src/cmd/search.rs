@@ -1,11 +1,11 @@
 //! `nissia search` — the tool's OWN web search. No API key required by default.
 //!
-//! Default backend: Mojeek over plain HTTP (no key, scrape-tolerant, no headless
-//! fingerprint). So the calling agent (e.g. Claude Code) never has to navigate to
-//! Google itself, and never needs an external LLM/API to search.
+//! Default (no key) tries real web results first (Mojeek over plain HTTP) and falls
+//! back to the DuckDuckGo Instant Answer API (always responds) so a search rarely
+//! comes back empty. No headless fingerprint, no external LLM, no API key.
 //!
 //! Optional API backends for higher volume/quality: set NISSIA_SEARCH_API_KEY and
-//! NISSIA_SEARCH_PROVIDER = brave | serper | tavily.
+//! NISSIA_SEARCH_PROVIDER = brave | serper | tavily (or force one of: mojeek | ddg).
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -80,12 +80,22 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
         if key.is_some() {
             "brave".to_string()
         } else {
-            "mojeek".to_string()
+            "auto".to_string()
         }
     });
 
     match provider.as_str() {
+        // No-key default: real web results, with a reliable fallback.
+        "auto" => {
+            if let Ok(h) = mojeek(client, query, n).await {
+                if !h.is_empty() {
+                    return Ok(h);
+                }
+            }
+            ddg_instant(client, query, n).await
+        }
         "mojeek" => mojeek(client, query, n).await,
+        "ddg" => ddg_instant(client, query, n).await,
         "brave" => {
             let k = key.context("NISSIA_SEARCH_API_KEY required for brave")?;
             brave(client, query, n, &k).await
@@ -99,7 +109,7 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
             tavily(client, query, n, &k).await
         }
         other => bail!(
-            "unknown NISSIA_SEARCH_PROVIDER '{other}' (use: mojeek | brave | serper | tavily)"
+            "unknown NISSIA_SEARCH_PROVIDER '{other}' (use: auto | mojeek | ddg | brave | serper | tavily)"
         ),
     }
 }
@@ -179,17 +189,73 @@ fn parse_mojeek(html: &str, n: usize) -> Vec<Hit> {
 
 async fn mojeek(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hit>> {
     let url = reqwest::Url::parse_with_params("https://www.mojeek.com/search", &[("q", query)])?;
-    let html = client
+    let resp = client
         .get(url)
         .header("User-Agent", UA)
         .header("Accept-Language", "en-US,en;q=0.9")
         .send()
         .await
-        .context("Mojeek request failed")?
-        .text()
-        .await
-        .context("Mojeek response read failed")?;
+        .context("Mojeek request failed")?;
+    if !resp.status().is_success() {
+        // rate-limited or blocked; let the caller fall back
+        bail!("Mojeek HTTP {}", resp.status());
+    }
+    let html = resp.text().await.context("Mojeek response read failed")?;
     Ok(parse_mojeek(&html, n))
+}
+
+fn collect_topics(arr: &[Value], out: &mut Vec<Hit>) {
+    for it in arr {
+        if let Some(sub) = it["Topics"].as_array() {
+            collect_topics(sub, out);
+        } else {
+            let text = it["Text"].as_str().unwrap_or("");
+            let url = it["FirstURL"].as_str().unwrap_or("");
+            if !text.is_empty() {
+                out.push(Hit {
+                    title: text.chars().take(80).collect(),
+                    url: url.to_string(),
+                    snippet: text.to_string(),
+                });
+            }
+        }
+    }
+}
+
+async fn ddg_instant(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hit>> {
+    let url = reqwest::Url::parse_with_params(
+        "https://api.duckduckgo.com/",
+        &[
+            ("q", query),
+            ("format", "json"),
+            ("no_html", "1"),
+            ("skip_disambig", "1"),
+        ],
+    )?;
+    let v: Value = client
+        .get(url)
+        .header("User-Agent", "nissia-browser")
+        .send()
+        .await
+        .context("DuckDuckGo request failed")?
+        .json()
+        .await
+        .context("DuckDuckGo response was not JSON")?;
+
+    let mut hits = Vec::new();
+    let abstract_text = v["AbstractText"].as_str().unwrap_or("");
+    if !abstract_text.is_empty() {
+        hits.push(Hit {
+            title: v["Heading"].as_str().unwrap_or("").to_string(),
+            url: v["AbstractURL"].as_str().unwrap_or("").to_string(),
+            snippet: abstract_text.to_string(),
+        });
+    }
+    if let Some(rt) = v["RelatedTopics"].as_array() {
+        collect_topics(rt, &mut hits);
+    }
+    hits.truncate(n);
+    Ok(hits)
 }
 
 async fn brave(client: &reqwest::Client, query: &str, n: usize, key: &str) -> Result<Vec<Hit>> {
