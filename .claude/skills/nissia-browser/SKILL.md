@@ -22,7 +22,7 @@ Corré `nissia update --check` (cacheado 24h, no hace red si ya chequeó hoy). S
 ("update available: X -> Y"), avisale al usuario en una línea que hay nueva versión y seguí.
 Si no imprime nada, no digas nada.
 
-## 1. Elegí el modo (preguntá si no es obvio)
+## 1. SIEMPRE preguntá el modo (regla del dueño, no la saltes nunca)
 
 | Modo | Cómo trabaja | Ventana | Velocidad | Cuándo |
 |------|--------------|---------|-----------|--------|
@@ -30,9 +30,10 @@ Si no imprime nada, no digas nada.
 | **Navegar** | interno, **headless** (sin ventana): navegás varias páginas, leés, extraés | no | media, barata | recolectar/leer sin que el usuario mire |
 | **Agente** | navegador **real y visible** (Chrome/Edge/Brave/Opera): el usuario lo ve moverse | sí | la más lenta | tarea abierta que el usuario quiere VER |
 
-- Si el pedido ya implica uno ("buscá ..." → Search; "leé/extraé de ..." → Navegar;
-  "modo agente" / "entrá y mostrame" / "buscá vuelos y mostrame" → Agente), saltá la pregunta.
-- Para preguntar usá `AskUserQuestion` con esas 3 opciones.
+- **OBLIGATORIO: preguntá SIEMPRE con `AskUserQuestion` cuál de los 3 modos, aunque parezca
+  obvio.** Nunca asumas el modo, ni siquiera si el pedido dice "buscá"/"entrá"/"modo agente".
+- **Si eligen Agente, preguntá DESPUÉS qué navegador** (corré `nissia browser detect` primero
+  y ofrecé solo los instalados, con `AskUserQuestion`). No lances nada antes de esas respuestas.
 
 ## 2. Modo Agente: navegador visible, multiplataforma, y que el usuario lo VEA
 
