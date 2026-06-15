@@ -1,5 +1,8 @@
 <p align="center">
-  <strong>nissia browser</strong><br>
+  <img src="assets/nissia-browser-logo.png" alt="nissia browser" width="440">
+</p>
+
+<p align="center">
   <em>A token-cheap way for AI agents to browse the web</em>
 </p>
 
