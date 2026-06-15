@@ -47,7 +47,8 @@ $exe="C:\Program Files\Google\Chrome\Application\chrome.exe"            # Chrome
 # $exe="$env:LOCALAPPDATA\Programs\Opera\opera.exe"                     # Opera (solo visible)
 $udd="$env:LOCALAPPDATA\nissia-live"
 $pids=(Get-NetTCPConnection -LocalPort 9222 -State Listen).OwningProcess|Select-Object -Unique
-foreach($p in $pids){Stop-Process -Id $p -Force}; nissia browser stop *>$null; Start-Sleep -Seconds 2
+foreach($p in $pids){Stop-Process -Id $p -Force}; nissia browser stop *>$null
+for($i=0;$i -lt 20;$i++){ if(-not (Get-NetTCPConnection -LocalPort 9222 -State Listen)){break}; Start-Sleep -Milliseconds 300 }  # esperar que 9222 se libere (robusto al cambiar de navegador)
 Start-Process $exe -ArgumentList '--remote-debugging-port=9222',"--user-data-dir=$udd",'--no-first-run','--no-default-browser-check','--disable-blink-features=AutomationControlled','--start-maximized','--new-window','about:blank'
 for($i=0;$i -lt 30;$i++){ if((nissia eval "1" 2>$null) -match '1'){break}; Start-Sleep -Milliseconds 400 }
 Add-Type @"
