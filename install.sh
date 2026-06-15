@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPO="OWNER/nissia-browser"
+REPO="itielsefer23/nissia-browser"
 INSTALL_DIR="/usr/local/bin"
 BINARY="nissia"
 TMPDIR_INSTALL=""
@@ -71,7 +71,7 @@ install() {
     info "Detected platform: ${platform}"
 
     # Use provided version or fetch latest
-    version="${SNACT_VERSION:-$(get_latest_version)}"
+    version="${NISSIA_VERSION:-$(get_latest_version)}"
     info "Installing nissia ${version}"
 
     url="https://github.com/${REPO}/releases/download/${version}/${platform}.tar.gz"

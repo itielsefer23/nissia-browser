@@ -3,7 +3,7 @@
 ## Getting started
 
 ```bash
-git clone git@github.com:OWNER/nissia-browser.git
+git clone git@github.com:itielsefer23/nissia-browser.git
 cd nissia
 cargo build
 ```
@@ -49,8 +49,8 @@ nissia browser stop
 
 We use [Conventional Commits](https://www.conventionalcommits.org/):
 
-- `feat:` — new feature (triggers minor version bump)
-- `fix:` — bug fix (triggers patch version bump)
+- `feat:` — new feature
+- `fix:` — bug fix
 - `docs:` — documentation only
 - `refactor:` — code change that neither fixes a bug nor adds a feature
 - `test:` — adding or updating tests

@@ -1,9 +1,9 @@
 # nissia installer for Windows
-# Usage: irm https://raw.githubusercontent.com/OWNER/nissia-browser/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "OWNER/nissia-browser"
+$Repo = "itielsefer23/nissia-browser"
 $BinaryName = "nissia.exe"
 $InstallDir = "$env:LOCALAPPDATA\nissia\bin"
 
@@ -27,7 +27,7 @@ $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "x86" }
 $assetName = "nissia-windows-$arch"
 Write-Host "==> Platform: $assetName" -ForegroundColor Green
 
-$version = if ($env:SNACT_VERSION) { $env:SNACT_VERSION } else { Get-LatestVersion }
+$version = if ($env:NISSIA_VERSION) { $env:NISSIA_VERSION } else { Get-LatestVersion }
 Write-Host "==> Installing nissia $version" -ForegroundColor Green
 
 $url = "https://github.com/$Repo/releases/download/$version/$assetName.zip"
