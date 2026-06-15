@@ -1,11 +1,14 @@
 //! `nissia search` — the tool's OWN web search. No API key required by default.
 //!
-//! Default (no key) tries real web results first (Mojeek over plain HTTP) and falls
-//! back to the DuckDuckGo Instant Answer API (always responds) so a search rarely
-//! comes back empty. No headless fingerprint, no external LLM, no API key.
+//! Default (no key): real web results from Mojeek (HTTP) with a DuckDuckGo Instant
+//! Answer fallback, so a search rarely comes back empty. No headless fingerprint, no
+//! external LLM, no API key.
 //!
-//! Optional API backends for higher volume/quality: set NISSIA_SEARCH_API_KEY and
-//! NISSIA_SEARCH_PROVIDER = brave | serper | tavily (or force one of: mojeek | ddg).
+//! Optional API backends for higher volume/quality: brave | serper | tavily. The key
+//! and provider can come from env (NISSIA_SEARCH_API_KEY / NISSIA_SEARCH_PROVIDER) or
+//! from a saved config file `<data_dir>/search.json` ({"provider":"brave","api_key":"..."}).
+//! Paid providers are metered: usage is counted per month in `<data_dir>/usage.json` and
+//! the remaining free quota is printed after each call.
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -22,6 +25,16 @@ struct Hit {
 const UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
      Chrome/124.0.0.0 Safari/537.36";
+
+/// Approx monthly free quota per provider (for the usage hint).
+fn free_quota(provider: &str) -> Option<u64> {
+    match provider {
+        "brave" => Some(2000),
+        "tavily" => Some(1000),
+        "serper" => Some(2500), // one-time, but we still show the count
+        _ => None,
+    }
+}
 
 pub async fn run(
     port: u16,
@@ -74,15 +87,68 @@ pub async fn run(
     Ok(())
 }
 
-async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hit>> {
-    let key = std::env::var("NISSIA_SEARCH_API_KEY").ok();
-    let provider = std::env::var("NISSIA_SEARCH_PROVIDER").unwrap_or_else(|_| {
-        if key.is_some() {
-            "brave".to_string()
-        } else {
-            "auto".to_string()
+/// Read provider + api_key from `<data_dir>/search.json` (if present).
+fn load_config() -> (Option<String>, Option<String>) {
+    let path = nissia_core::data_dir().join("search.json");
+    if let Ok(txt) = std::fs::read_to_string(path) {
+        if let Ok(v) = serde_json::from_str::<Value>(&txt) {
+            return (
+                v["provider"].as_str().map(|s| s.to_string()),
+                v["api_key"].as_str().map(|s| s.to_string()),
+            );
         }
-    });
+    }
+    (None, None)
+}
+
+/// year-month "YYYY-MM" from the system clock (no extra deps; Hinnant's civil date).
+fn current_month() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let z = secs / 86400 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y}-{m:02}")
+}
+
+/// Count one paid search for `provider` this month and print remaining free quota.
+fn meter(provider: &str) {
+    let path = nissia_core::data_dir().join("usage.json");
+    let mut data: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    let key = format!("{provider}-{}", current_month());
+    let used = data[&key].as_u64().unwrap_or(0) + 1;
+    data[&key] = json!(used);
+    let _ = std::fs::write(&path, data.to_string());
+    match free_quota(provider) {
+        Some(cap) => eprintln!("({provider}: {used}/{cap} este mes)"),
+        None => eprintln!("({provider}: {used} este mes)"),
+    }
+}
+
+async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hit>> {
+    let (cfg_provider, cfg_key) = load_config();
+    let key = std::env::var("NISSIA_SEARCH_API_KEY").ok().or(cfg_key);
+    let provider = std::env::var("NISSIA_SEARCH_PROVIDER")
+        .ok()
+        .or(cfg_provider)
+        .unwrap_or_else(|| {
+            if key.is_some() {
+                "brave".to_string()
+            } else {
+                "auto".to_string()
+            }
+        });
 
     match provider.as_str() {
         // No-key default: real web results, with a reliable fallback.
@@ -96,17 +162,15 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
         }
         "mojeek" => mojeek(client, query, n).await,
         "ddg" => ddg_instant(client, query, n).await,
-        "brave" => {
-            let k = key.context("NISSIA_SEARCH_API_KEY required for brave")?;
-            brave(client, query, n, &k).await
-        }
-        "serper" => {
-            let k = key.context("NISSIA_SEARCH_API_KEY required for serper")?;
-            serper(client, query, n, &k).await
-        }
-        "tavily" => {
-            let k = key.context("NISSIA_SEARCH_API_KEY required for tavily")?;
-            tavily(client, query, n, &k).await
+        "brave" | "serper" | "tavily" => {
+            let k = key.context("NISSIA_SEARCH_API_KEY (o search.json) requerido para este proveedor")?;
+            let hits = match provider.as_str() {
+                "brave" => brave(client, query, n, &k).await?,
+                "serper" => serper(client, query, n, &k).await?,
+                _ => tavily(client, query, n, &k).await?,
+            };
+            meter(&provider);
+            Ok(hits)
         }
         other => bail!(
             "unknown NISSIA_SEARCH_PROVIDER '{other}' (use: auto | mojeek | ddg | brave | serper | tavily)"
@@ -131,7 +195,6 @@ fn decode_entities(s: &str) -> String {
         .replace("&mdash;", "-")
         .replace("&ndash;", "-")
         .replace("&hellip;", "...");
-    // Numeric entities: &#NN; and &#xHH;. Map fancy quotes/dashes to ASCII.
     let re = regex::Regex::new(r"&#(x?)([0-9A-Fa-f]+);").unwrap();
     re.replace_all(&named, |c: &regex::Captures| {
         let cp = if &c[1] == "x" {
@@ -151,7 +214,6 @@ fn decode_entities(s: &str) -> String {
     .into_owned()
 }
 
-/// Parse Mojeek's result HTML (stable, simple markup: li.rN > a.title + p.s).
 fn parse_mojeek(html: &str, n: usize) -> Vec<Hit> {
     let tag_re = regex::Regex::new(r"<[^>]+>").unwrap();
     let title_re =
@@ -173,11 +235,7 @@ fn parse_mojeek(html: &str, n: usize) -> Vec<Hit> {
                 .map(|s| clean(s.get(1).map(|m| m.as_str()).unwrap_or("")))
                 .unwrap_or_default();
             if !title.is_empty() {
-                hits.push(Hit {
-                    title,
-                    url,
-                    snippet,
-                });
+                hits.push(Hit { title, url, snippet });
             }
             if hits.len() >= n {
                 break;
@@ -197,7 +255,6 @@ async fn mojeek(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<H
         .await
         .context("Mojeek request failed")?;
     if !resp.status().is_success() {
-        // rate-limited or blocked; let the caller fall back
         bail!("Mojeek HTTP {}", resp.status());
     }
     let html = resp.text().await.context("Mojeek response read failed")?;
