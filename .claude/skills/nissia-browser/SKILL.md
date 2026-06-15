@@ -59,8 +59,10 @@ $w=Get-Process chrome,msedge,opera|?{$_.MainWindowTitle}|sort StartTime -Descend
 if($w){[W]::ShowWindow($w.MainWindowHandle,3)|Out-Null;[W]::BringWindowToTop($w.MainWindowHandle)|Out-Null;[W]::SetForegroundWindow($w.MainWindowHandle)|Out-Null}
 ```
 - Edge: igual que Chrome (headless y visible). Opera: **solo visible** (restringe el debug en headless).
-- Tras navegar y ANTES de leer, **cerrá publicidades/banners**: `nissia dismiss` (cierra cookies,
-  consent, modales y overlays fijos para que se pueda leer). Después `nissia read`.
+- Tras navegar, **esperá ~1s y corré `nissia dismiss`** (los CMP de cookies aparecen con retraso);
+  corrélo **2 veces** para los tardíos. Cierra cookies/consent (OneTrust/Didomi/Sourcepoint/Quantcast,
+  también dentro de iframes), modales, overlays y ads (outbrain/taboola). Después `nissia read`.
+  Ej: `nissia snap <url>` → `nissia wait 1200` → `nissia dismiss` → `nissia dismiss` → `nissia read --focus main`.
 - macOS/Linux: lanzá el navegador con los mismos flags. Google bloquea la búsqueda automatizada
   (CAPTCHA): buscá con `search --browser`, no en google.com.
 
