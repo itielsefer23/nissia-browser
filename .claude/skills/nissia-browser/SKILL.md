@@ -89,15 +89,37 @@ Reusá el navegador caliente. `eval`/`read --focus` > `snap` entero; actuá con 
 
 ## Comandos
 ```bash
-nissia search "<q>" [--n N] [--read] [--browser]   nissia batch   nissia dismiss
+nissia search "<q>" [--n N] [--read] [--browser] [--open N]   nissia batch   nissia dismiss
 nissia snap <url> [--focus sel]   nissia read [url] [--focus sel]   nissia eval "<js>"
-nissia click @e1 [--no-snap]   nissia fill @e1 "v"   nissia type @e1 "t"   nissia scroll down
+nissia click @e1 [--no-snap]   nissia fill @e1 "v"   nissia type @e1 "t"   nissia select @e1 "v"
+nissia key enter|tab|escape|arrowdown|arrowup|space|...   nissia scroll down
 nissia screenshot --file out.png   nissia browser launch|stop|status   nissia session save|load
 ```
 
 ### Turbo agent (OPCIONAL, opt-in, needs an LLM key)
 `nissia agent "<goal>"` corre el loop con un modelo barato interno e imprime solo la respuesta.
 Necesita NISSIA_AGENT_API_KEY; apagado por defecto. Los otros modos no necesitan key.
+
+## Operar sitios como humano (interpretar al usuario)
+
+Interpretá lo que el usuario necesita (explícito o implícito) y operá el sitio como una persona:
+1. **Entender el objetivo.** "buscame vuelos Río→BsAs el 30/10" → ir a un sitio de vuelos, poner
+   origen, destino, fecha y buscar. Aunque no te lo diga paso a paso, deducilo como humano.
+2. **Encontrar el formulario.** `nissia snap --focus form` (o body) para ver los campos como @eN.
+3. **Rellenar como humano:**
+   - Texto: `nissia type @eN "texto"` (tecleo con pausas).
+   - Autocompletar (ciudades/aeropuertos): tecleá unas letras → `nissia wait 800` →
+     `nissia key arrowdown` → `nissia key enter` (o `snap` y `click` la sugerencia).
+   - Fechas: abrí el campo (`click @eN`) y `click` el día del calendario; o `type` si el input lo acepta.
+   - Listas/desplegables: `nissia select @eN "valor"`.
+4. **Enviar:** `nissia key enter` (o `click` el botón Buscar).
+5. **Esperar + leer:** `nissia wait 1500-3000` (los resultados cargan async) → `nissia dismiss` →
+   `nissia read --focus <contenedor de resultados>`.
+6. **Abrir un resultado:** con click humano (`search --open N`, o `snap`+`click @eN`), nunca teletransporte.
+
+Todo clic-por-clic, con pausas y scroll humanos; internamente también humano (eventos de mouse/teclado
+reales, `webdriver=false`) para que no te detecten como bot. Siempre con el mínimo de tokens
+(`--focus`, `eval`, `batch`; sin capturas).
 
 ## Token economy
 full `snap` 2-4k tok → `--focus`; auto re-snap 2-4k/acción → `--no-snap`;

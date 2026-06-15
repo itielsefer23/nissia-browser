@@ -171,6 +171,14 @@ enum Commands {
     /// Dismiss cookie banners, consent popups and blocking overlays so the page is readable.
     Dismiss,
 
+    /// Press a key: enter, tab, escape, backspace, arrowup/down/left/right, space, etc.
+    /// Submit a search (enter), move between fields (tab), or pick an autocomplete
+    /// suggestion (arrowdown then enter).
+    Key {
+        /// Key name (e.g. enter, tab, escape, arrowdown)
+        key: String,
+    },
+
     /// Session management
     Session {
         #[command(subcommand)]
@@ -573,6 +581,9 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         }
         Commands::Dismiss => {
             cmd::action::run_dismiss(cli.port, fmt).await?;
+        }
+        Commands::Key { key } => {
+            cmd::action::run_key(cli.port, &key, fmt).await?;
         }
         Commands::Session { action } => match action {
             SessionAction::Save { name } => {

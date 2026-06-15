@@ -310,3 +310,50 @@ pub async fn run_dismiss(port: u16, fmt: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Press a single key (enter, tab, escape, arrowdown, etc.) as a real key event.
+/// Lets the agent submit searches (enter), move fields (tab), or pick autocomplete
+/// suggestions (arrowdown + enter), like a human.
+pub async fn run_key(port: u16, key_name: &str, fmt: &str) -> Result<()> {
+    let transport = nissia_cdp::connect(port).await?;
+    let (key, code, vk, text): (&str, &str, i64, Option<&str>) = match key_name.to_lowercase().as_str() {
+        "enter" | "return" => ("Enter", "Enter", 13, None),
+        "tab" => ("Tab", "Tab", 9, None),
+        "escape" | "esc" => ("Escape", "Escape", 27, None),
+        "backspace" => ("Backspace", "Backspace", 8, None),
+        "delete" | "del" => ("Delete", "Delete", 46, None),
+        "arrowdown" | "down" => ("ArrowDown", "ArrowDown", 40, None),
+        "arrowup" | "up" => ("ArrowUp", "ArrowUp", 38, None),
+        "arrowleft" | "left" => ("ArrowLeft", "ArrowLeft", 37, None),
+        "arrowright" | "right" => ("ArrowRight", "ArrowRight", 39, None),
+        "space" => (" ", "Space", 32, Some(" ")),
+        "pagedown" => ("PageDown", "PageDown", 34, None),
+        "pageup" => ("PageUp", "PageUp", 33, None),
+        "home" => ("Home", "Home", 36, None),
+        "end" => ("End", "End", 35, None),
+        other => anyhow::bail!("unknown key {other:?} (enter|tab|escape|backspace|delete|arrowup|arrowdown|arrowleft|arrowright|space|pageup|pagedown|home|end)"),
+    };
+    let down = nissia_cdp::commands::InputDispatchKeyEvent {
+        event_type: "keyDown".to_string(),
+        key: Some(key.to_string()),
+        text: text.map(|t| t.to_string()),
+        unmodified_text: text.map(|t| t.to_string()),
+        code: Some(code.to_string()),
+        windows_virtual_key_code: Some(vk),
+        native_virtual_key_code: Some(vk),
+    };
+    transport.send(&down).await?;
+    let up = nissia_cdp::commands::InputDispatchKeyEvent {
+        event_type: "keyUp".to_string(),
+        key: Some(key.to_string()),
+        text: None,
+        unmodified_text: None,
+        code: Some(code.to_string()),
+        windows_virtual_key_code: Some(vk),
+        native_virtual_key_code: Some(vk),
+    };
+    transport.send(&up).await?;
+    maybe_record("key", HashMap::from([("key".into(), key_name.into())]));
+    ok(fmt, "key", None);
+    Ok(())
+}
