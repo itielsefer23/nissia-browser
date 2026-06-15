@@ -43,7 +43,11 @@ pub async fn execute(
             .await?;
     }
 
-    // Type each character
+    // Human-paced typing: small variable delay between keystrokes.
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0x9E37_79B9);
     for ch in text.chars() {
         let text_str = ch.to_string();
 
@@ -70,6 +74,12 @@ pub async fn execute(
                 native_virtual_key_code: None,
             })
             .await?;
+
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let delay = 40 + (seed >> 33) % 110; // ~40-150ms human typing
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
     }
 
     Ok(())

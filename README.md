@@ -1,6 +1,6 @@
 <p align="center">
   <strong>nissia browser</strong><br>
-  <em>The token-cheap browser CLI for AI agents</em>
+  <em>A token-cheap way for AI agents to browse the web</em>
 </p>
 
 <p align="center">
@@ -10,104 +10,57 @@
 
 ---
 
-**nissia browser** lets an AI agent (Claude Code, Cursor, Codex, Continue, Windsurf, ...)
-drive a real browser while spending as **few tokens as possible**.
+**nissia browser** lets an AI coding agent (Claude Code, Codex, Cursor and others) use a real
+web browser while spending very few tokens. It is a small command-line tool: your agent runs
+simple commands and only the useful result comes back. No MCP server, no heavy screenshots,
+and no API keys for everyday use.
 
-The agent is the brain. nissia is the cheap eyes and hands. There is **no internal LLM
-and no API key**: your agent decides what to do, and nissia executes it with the smallest
-possible output coming back into the agent's context. It is a CLI, not an MCP server, on
-purpose: you get back exactly what you print, and nothing lingers in context.
+## Why it is cheap and fast
+- It returns just the text or data you ask for, never whole pages or images.
+- A full "search a site and read it" task is about **500 tokens and a few seconds**.
+- Works with any agent that can run a shell command.
 
-```
-$ nissia snap https://github.com/login --focus form
-# Sign in to GitHub
-@e1 [textbox] "Username or email address"
-@e2 [textbox] "Password"
-@e3 [button] "Sign in"
+## The 3 modes
+1. **Search** — quickly find things on the web and get a short list of results. The fastest.
+2. **Navigate** — open a specific site and read or extract what you need (runs in the
+   background, no window).
+3. **Agent** — give it a goal: it searches, opens the best page, closes cookie and ad
+   pop-ups, and reads the answer, in a real visible browser you can watch.
 
-$ nissia fill @e1 "octocat" --no-snap
-$ nissia fill @e2 "hunter2" --no-snap
-$ nissia click @e3
-```
-
-## Two ways to use it
-
-1. **Navigate** (your agent drives): `snap` / `read` / `eval` / `click` / `fill` / `type`
-   / `scroll`, with the cheap defaults below. No key, no internal model.
-2. **Search** (built in): `nissia search "<query>"` returns a compact list of results
-   over plain HTTP. No API key required.
-
-## Why nissia is cheap
-
-| Leak | Typical cost | How nissia cuts it |
-|------|--------------|--------------------|
-| full-page `snap` | 2,000-4,000 tokens | always pass `--focus`; prefer `read` / `eval` |
-| auto re-snap after every action | 2-4k per action | act with `--no-snap`; observe only when needed |
-| base64 screenshots into context | huge | `screenshot --file out.png` returns a path, not bytes |
-
-More detail: [docs/TOKEN-ECONOMY.md](docs/TOKEN-ECONOMY.md).
+## What makes the Agent mode good
+- **Closes the annoying stuff.** Cookie consent banners (OneTrust, Didomi, Sourcepoint,
+  Quantcast, even the ones inside iframes) and ad pop-ups, so the page is readable.
+- **Acts like a human.** Real mouse clicks, smooth human-paced scrolling and typing, and it
+  hides the usual automation signals so sites do not treat it as a bot.
+- **Your browser, your choice.** Chrome, Edge or Opera.
 
 ## Install
-
 ```bash
-git clone https://github.com/OWNER/nissia-browser.git
+git clone https://github.com/itielsefer23/nissia-browser.git
 cd nissia-browser
-cargo install --path crates/nissia-cli   # installs the `nissia` binary
+cargo install --path crates/nissia-cli   # installs the `nissia` command
 ```
 
-## Quickstart
-
+## Quick examples
 ```bash
-nissia browser launch --headless --background   # isolated, persistent profile
-nissia snap https://example.com --focus main    # structure + @eN refs (focused = cheap)
-nissia read --focus main                         # page text as markdown
-nissia eval "document.title"                     # run JS, extract exactly what you need
-nissia click @e1 --no-snap                       # act without paying for a re-snap
-nissia browser stop
+nissia search "best laptops 2026"             # quick web search
+nissia snap https://example.com --focus main  # open a page, list clickable elements
+nissia read https://example.com --focus main  # read a page as clean text
+nissia dismiss                                # close cookie banners and pop-ups
 ```
+Run `nissia --help` to see everything.
 
-> If you already have a normal Chrome open, prefer `--headless`: a visible launch can
-> hand off to the existing instance and never open the debug port.
+## Use it from Claude Code, Codex or Cursor
+This repo ships a `/nissia-browser` skill (in `.claude/skills/`). When you ask your agent to
+search or browse, it picks the right mode and runs nissia for you, keeping it cheap.
 
-## Search (no API key)
-
-```bash
-nissia search "anthropic claude code" --n 5      # default backend: Mojeek (no key)
-nissia search "rust async runtime" --read        # also read the top result
-```
-
-Want higher-volume or Google-grade results? Optionally set an API key:
-
-```bash
-export NISSIA_SEARCH_API_KEY=...
-export NISSIA_SEARCH_PROVIDER=brave              # brave | serper | tavily
-```
-
-## Token-economy helpers
-
-`examples/economy/nissia-economy.ps1` (Windows) and `nissia-economy.sh` (Unix) wrap the
-binary with the cheap defaults baked in: `peek` (focused read), `grab` (eval),
-`act` (no re-snap), `shot` (screenshot to file), and a headless-first launch guard.
-
-```bash
-./examples/economy/nissia-economy.sh open https://example.com main
-./examples/economy/nissia-economy.sh grab "document.title"
-```
-
-## Commands
-
-`snap` `read` `eval` `click` `fill` `type` `select` `scroll` `screenshot` `wait`
-`search` `session` `record` `replay` `browser` `schema` `mcp` `init`
-
-Run `nissia --help` or `nissia schema [command]` for details.
-
-## Credits
-
-nissia browser is built on the Chrome DevTools Protocol core and snapshot compressor from
-the MIT-licensed **snact** project by Kiyeon Jeon. nissia reshapes it into its own tool
-with a built-in no-key `search`, token-economy wrappers, and a headless-first workflow.
-The MIT license (see [LICENSE](LICENSE)) requires keeping that original credit.
+## Optional extras
+- **Better search results** with a self-hosted SearXNG instance (`NISSIA_SEARXNG_URL`). Not
+  required: the default DuckDuckGo search needs no setup and no key.
+- **Hands-off agent** with a cheap AI key (`nissia agent "<goal>"`), off by default.
 
 ## License
-
-MIT, see [LICENSE](LICENSE).
+**MIT** — free to use, change and share, including in commercial projects. The only rule is to
+keep the license and copyright notice. nissia is a fork of the MIT-licensed
+[snact](https://github.com/vericontext/snact) project by Kiyeon Jeon, whose original copyright
+is kept in [LICENSE](LICENSE) next to ours.
