@@ -19,6 +19,7 @@
 //!   scroll [up|down]
 //!   dismiss               close cookie/consent banners + blocking overlays
 //!   reload [hard]         refresh the page and wait for DOM ready (human recovery)
+//!   back / forward        history nav (return to results to pick another link, no re-search)
 //!   wait <ms>             fixed pause (use sparingly)
 //!   waitfor <css>         ADAPTIVE: wait until selector appears (max 10s) — prefer this
 //!   waitgone <css>        wait until selector disappears, e.g. a spinner (max 15s)
@@ -133,6 +134,14 @@ async fn exec_line(
         "reload" => {
             let hard = rest.eq_ignore_ascii_case("hard");
             nissia_core::action::reload::execute(transport, hard).await?;
+            Ok("ok".to_string())
+        }
+        "back" => {
+            nissia_core::action::history::go(transport, false).await?;
+            Ok("ok".to_string())
+        }
+        "forward" => {
+            nissia_core::action::history::go(transport, true).await?;
             Ok("ok".to_string())
         }
         "fill" => {

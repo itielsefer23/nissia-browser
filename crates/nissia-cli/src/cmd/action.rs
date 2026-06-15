@@ -302,9 +302,11 @@ pub async fn run_dismiss(port: u16, fmt: &str) -> Result<()> {
     } else {
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
         let removed = parsed["removed"].as_i64().unwrap_or(0);
-        match parsed["accepted"].as_str() {
-            Some(a) => println!("dismissed {removed} overlays (accepted: {a})"),
-            None => println!("dismissed {removed} overlays"),
+        let clicked = parsed["accepted"].as_i64().unwrap_or(0);
+        if clicked > 0 {
+            println!("dismissed {removed} overlays ({clicked} buttons clicked)");
+        } else {
+            println!("dismissed {removed} overlays");
         }
     }
     Ok(())
@@ -317,6 +319,17 @@ pub async fn run_reload(port: u16, hard: bool, fmt: &str) -> Result<()> {
     nissia_core::action::reload::execute(&transport, hard).await?;
     maybe_record("reload", HashMap::from([("hard".into(), hard.to_string())]));
     ok(fmt, "reload", None);
+    Ok(())
+}
+
+/// Go back (or forward) in history — return to the previous page (e.g. the
+/// search results) to pick another link without re-searching.
+pub async fn run_history(port: u16, forward: bool, fmt: &str) -> Result<()> {
+    let transport = nissia_cdp::connect(port).await?;
+    nissia_core::action::history::go(&transport, forward).await?;
+    let action = if forward { "forward" } else { "back" };
+    maybe_record(action, HashMap::new());
+    ok(fmt, action, None);
     Ok(())
 }
 

@@ -1,1 +1,5 @@
 blank_issues_enabled: true
+contact_links:
+  - name: 💬 Comments & questions (Discussions)
+    url: https://github.com/itielsefer23/nissia-browser/discussions
+    about: Leave a comment, ask a question, or chat about ideas for the skill.

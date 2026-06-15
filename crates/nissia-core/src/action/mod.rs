@@ -1,6 +1,7 @@
 pub mod click;
 pub mod dismiss;
 pub mod fill;
+pub mod history;
 pub mod key;
 pub mod reload;
 pub mod screenshot;

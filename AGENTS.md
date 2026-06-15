@@ -26,17 +26,29 @@ smallest useful output.
 ## Commands
 
 ```bash
+nissia browser detect|default|launch|focus|stop|status   # detect/choose browser; focus = bring window to front
 nissia browser launch --headless --background --idle-timeout 30
 nissia snap <url> [--focus "selector"]   # structure + @eN refs + section summaries
 nissia read [url] [--focus "selector"]   # page text as markdown
 nissia eval "<js>"                       # run JS, return its result (best for data)
-nissia click @e1 [--no-snap]             # also: fill @e1 "v" / type @e1 "t" / select @e1 "v" / scroll down
+nissia click @e1 [--no-snap]             # also: fill @e1 "v" / type @e1 "t" / select @e1 "v"
+nissia click --sel "<css>"               # real mouse click by CSS selector (calendar cells, grids)
+nissia key enter|tab|arrowdown|...       # real key events (submit, autocomplete)
+nissia scroll down|read                  # "read" = human read-through of the whole page
+nissia dismiss                           # close cookie banners / pop-ups / ads (+ persistent guard)
+nissia reload [--hard]                   # refresh and wait (human recovery)
+nissia back | nissia forward             # history nav: return to results, pick another link, no re-search
 nissia screenshot --file out.png         # screenshot to a file (path, not base64)
-nissia search "<query>" [--n N] [--read] # built-in web search, no API key
+nissia search "<query>" [--n N] [--read] [--browser] [--open N]   # built-in web search, no API key
 nissia session save|load <name>          # persist cookies / login state
 nissia record start|stop <name> ; nissia replay <name>   # zero-LLM repeats
+nissia update [--check]                  # check for a newer version
 nissia browser stop
 ```
+
+Human navigation (Agent mode, all inside the binary, zero tokens): clicks move the mouse on a
+curved Bézier path; `search --browser` types the query and clicks a real result (referrer);
+`scroll read` scans the page like a person. See docs/GUIDE.md.
 
 ## Token economy (why nissia exists)
 
@@ -72,5 +84,6 @@ eval document.title
 ' | nissia batch
 ```
 
-Verbs: goto/snap/read/eval/click/fill/type/select/scroll/wait. No `sleep` (nissia waits
-internally). Reuse the warm browser. See docs/SPEED.md.
+Verbs: goto / snap / read / eval / click / clicksel / key / fill / type / typesel /
+select / scroll [up|down|read] / dismiss / reload / back / forward / wait / waitfor / waitgone.
+Prefer adaptive `waitfor <css>` over fixed `wait <ms>`. Reuse the warm browser. See docs/SPEED.md.

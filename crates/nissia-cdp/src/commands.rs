@@ -601,7 +601,7 @@ impl CdpCommand for RuntimeCallFunctionOn {
 // Input domain
 // ============================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputDispatchMouseEvent {
     #[serde(rename = "type")]
@@ -612,6 +612,11 @@ pub struct InputDispatchMouseEvent {
     pub button: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub click_count: Option<i64>,
+    /// Wheel scroll deltas (only for event_type = "mouseWheel").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_x: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_y: Option<f64>,
 }
 
 impl CdpCommand for InputDispatchMouseEvent {

@@ -5,6 +5,55 @@ fn pid_file(port: u16) -> PathBuf {
     nissia_core::data_dir().join(format!("chrome-{port}.pid"))
 }
 
+fn default_file() -> PathBuf {
+    nissia_core::data_dir().join("browser.json")
+}
+
+/// The user's saved default browser (chrome|edge|brave|opera|chromium), if any.
+pub fn load_default() -> Option<String> {
+    let txt = std::fs::read_to_string(default_file()).ok()?;
+    serde_json::from_str::<serde_json::Value>(&txt)
+        .ok()?
+        .get("default")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// Get, set, or clear the default browser. With no name, prints the current default.
+/// Pass "clear" / "none" / "reset" to forget it (so the skill asks again).
+pub fn run_default(name: Option<&str>, fmt: &str) -> Result<()> {
+    if let Some(n) = name {
+        let n = n.to_lowercase();
+        if n == "clear" || n == "none" || n == "reset" {
+            std::fs::remove_file(default_file()).ok();
+            if fmt == "json" {
+                println!("{}", serde_json::json!({"status": "ok", "default": null}));
+            } else {
+                println!("default browser cleared (will ask again next time)");
+            }
+            return Ok(());
+        }
+        std::fs::create_dir_all(nissia_core::data_dir()).ok();
+        std::fs::write(default_file(), serde_json::json!({"default": n}).to_string())?;
+        if fmt == "json" {
+            println!("{}", serde_json::json!({"status": "ok", "default": n}));
+        } else {
+            println!("default browser set to: {n}");
+        }
+    } else {
+        let cur = load_default();
+        if fmt == "json" {
+            println!("{}", serde_json::json!({"default": cur}));
+        } else {
+            match cur {
+                Some(c) => println!("default browser: {c}"),
+                None => println!("no default browser set (auto-detect). Set one with: nissia browser default <chrome|edge|brave|opera>"),
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run_launch(
     port: u16,
@@ -35,7 +84,10 @@ pub fn run_launch(
     // Persistent profile directory — keeps cookies/state between sessions
     let profile_name = profile.unwrap_or("default");
     let profile_dir = nissia_core::data_dir().join("profiles").join(profile_name);
-    let managed = nissia_cdp::ManagedBrowser::launch(port, headless, &profile_dir, browser)?;
+    // Explicit --browser wins; otherwise fall back to the saved default browser.
+    let saved_default = load_default();
+    let chosen = browser.or(saved_default.as_deref());
+    let managed = nissia_cdp::ManagedBrowser::launch(port, headless, &profile_dir, chosen)?;
     let pid = managed.pid();
 
     // Save PID to file

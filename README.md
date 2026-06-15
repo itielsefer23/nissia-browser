@@ -70,12 +70,38 @@ the skill on startup). Run the installer again to upgrade, then re-copy the skil
 
 ## Use it from Claude Code, Codex or Cursor
 This repo ships a `/nissia-browser` skill (in `.claude/skills/`). When you ask your agent to
-search or browse, it picks the right mode and runs nissia for you, keeping it cheap.
+search or browse, it asks which mode (and which browser for Agent mode) and runs nissia for
+you, keeping it cheap.
+
+## Documentation
+- [docs/GUIDE.md](docs/GUIDE.md) — complete guide: the 3 modes, browser selection and default,
+  Agent mode, human navigation (mouse trajectory, typed search, read-scroll, pop-up closing),
+  operating forms, batch, full command reference.
+- [docs/TOKEN-ECONOMY.md](docs/TOKEN-ECONOMY.md) — how it keeps token cost tiny.
+- [docs/SPEED.md](docs/SPEED.md) — performance numbers and how to stay fast.
 
 ## Optional extras
-- **Better search results** with a self-hosted SearXNG instance (`NISSIA_SEARXNG_URL`). Not
-  required: the default DuckDuckGo search needs no setup and no key.
-- **Hands-off agent** with a cheap AI key (`nissia agent "<goal>"`), off by default.
+You don't need any of these. The defaults (DuckDuckGo search + you, the agent, driving) work
+with no setup and no keys. These are only for specific cases:
+
+- **SearXNG for better/unlimited search.** [SearXNG](https://github.com/searxng/searxng) is a
+  free, open-source metasearch engine you run yourself (one Docker container). It aggregates
+  Google, Bing, etc. and has no rate limits, so search results are richer than the default. Use
+  it only if the built-in DuckDuckGo search isn't enough for you. To enable:
+  1. Run an instance (e.g. `docker run -d -p 8888:8080 searxng/searxng`) and turn on the JSON
+     output format in its `settings.yml`.
+  2. Point nissia at it: set `NISSIA_SEARXNG_URL=http://localhost:8888` (or add
+     `"searxng_url": "http://localhost:8888"` to `<data-dir>/search.json`).
+  3. Select it: `NISSIA_SEARCH_PROVIDER=searxng nissia search "your query"`.
+- **Hands-off agent (opt-in).** `nissia agent "<goal>"` runs a small internal LLM loop and prints
+  only the final answer. It needs your own API key in `NISSIA_AGENT_API_KEY`; it is off by
+  default and the normal search/navigate/agent modes never use it.
+
+## Feedback
+Ideas, comments and "this site didn't work" reports are very welcome and shape the skill:
+- 💡 [Open a feedback issue](https://github.com/itielsefer23/nissia-browser/issues/new?template=feedback.yml) (structured form).
+- 🐞 [Report a bug](https://github.com/itielsefer23/nissia-browser/issues/new?template=bug_report.yml).
+- 💬 [Discussions](https://github.com/itielsefer23/nissia-browser/discussions) for free-form comments and questions.
 
 ## License
 **MIT** — free to use, change and share, including in commercial projects. The only rule is to

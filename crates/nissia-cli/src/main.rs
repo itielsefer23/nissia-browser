@@ -138,14 +138,15 @@ enum Commands {
         no_snap: bool,
     },
 
-    /// Scroll the page in a direction.
+    /// Scroll the page. Direction up/down/left/right, or "read" for a human
+    /// read-through (scans the whole page with reading pauses, ~3-5s, bounded).
     /// Returns updated page snapshot automatically.
     Scroll {
-        /// Direction: up, down, left, right
+        /// Direction: up, down, left, right, or read
         #[arg(default_value = "down")]
         direction: String,
 
-        /// Pixels to scroll [default: 400]
+        /// Pixels to scroll (or, for "read", max screens) [default: 600 / 8 screens]
         #[arg(long)]
         amount: Option<i64>,
 
@@ -184,6 +185,13 @@ enum Commands {
         #[arg(long)]
         hard: bool,
     },
+
+    /// Go back to the previous page (like the browser's back button). Use it to
+    /// return to the search results and pick another link without re-searching.
+    Back,
+
+    /// Go forward in history (undo a `back`).
+    Forward,
 
     /// Press a key: enter, tab, escape, backspace, arrowup/down/left/right, space, etc.
     /// Submit a search (enter), move between fields (tab), or pick an autocomplete
@@ -346,6 +354,12 @@ enum BrowserAction {
     Focus,
     /// List Chromium-based browsers installed on this machine
     Detect,
+    /// Get/set/clear the default browser (chrome|edge|brave|opera|chromium). When set,
+    /// launch uses it automatically so the skill need not ask every time.
+    Default {
+        /// Browser name to set as default; "clear" to forget it. Omit to print current.
+        name: Option<String>,
+    },
 }
 
 const AGENT_GUIDE: &str = "\
@@ -624,6 +638,12 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         Commands::Reload { hard } => {
             cmd::action::run_reload(cli.port, hard, fmt).await?;
         }
+        Commands::Back => {
+            cmd::action::run_history(cli.port, false, fmt).await?;
+        }
+        Commands::Forward => {
+            cmd::action::run_history(cli.port, true, fmt).await?;
+        }
         Commands::Key { key } => {
             cmd::action::run_key(cli.port, &key, fmt).await?;
         }
@@ -687,6 +707,9 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
             }
             BrowserAction::Detect => {
                 cmd::browser::run_detect(fmt)?;
+            }
+            BrowserAction::Default { name } => {
+                cmd::browser::run_default(name.as_deref(), fmt)?;
             }
         },
         Commands::Mcp => {

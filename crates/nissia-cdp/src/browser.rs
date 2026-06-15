@@ -90,11 +90,16 @@ async fn http_get(port: u16, path: &str) -> CdpResult<String> {
                 Ok(0) => break,
                 Ok(n) => {
                     buf.extend_from_slice(&tmp[..n]);
+                    // Break only when the BODY is complete, valid JSON. The old
+                    // "ends with } or ]" heuristic truncated large /json/list
+                    // responses mid-array (a chunk ending on a nested object),
+                    // causing intermittent "EOF while parsing" errors. We also
+                    // break on connection close (Ok(0)) as the ultimate fallback.
                     let text = String::from_utf8_lossy(&buf);
                     if let Some(body_start) = text.find("\r\n\r\n") {
-                        let body = &text[body_start + 4..];
-                        let trimmed = body.trim();
-                        if (trimmed.ends_with('}') || trimmed.ends_with(']')) && !trimmed.is_empty()
+                        let body = text[body_start + 4..].trim();
+                        if !body.is_empty()
+                            && serde_json::from_str::<serde_json::Value>(body).is_ok()
                         {
                             break;
                         }

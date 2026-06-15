@@ -426,36 +426,121 @@ async fn ddg_browser(
     super::ensure_browser(port).await?;
     let transport = nissia_cdp::connect(port).await?;
     transport.send(&nissia_cdp::commands::PageEnable {}).await?;
-    let url = reqwest::Url::parse_with_params("https://html.duckduckgo.com/html/", &[("q", query)])?;
-    let _ = nissia_core::snap::execute(&transport, Some(url.as_str()), None, lang, emu).await?;
+
+    // If the browser is ALREADY on a DuckDuckGo results page for this same query
+    // (e.g. we just listed results and now `--open N` is opening one), reuse that
+    // page — do NOT re-run the whole search. Re-searching looks like going "back to
+    // the start, re-typing the query" to the user, and is slower.
+    let q_json = serde_json::to_string(query).unwrap_or_else(|_| "\"\"".to_string());
+    let already_check = format!(
+        "(function(){{try{{var onddg=/duckduckgo\\.com/.test(location.href);var has=!!document.querySelector('.result');var inp=document.querySelector('input[name=q]');var v=inp?(inp.value||'').trim().toLowerCase():'';var q={q_json}.trim().toLowerCase();return onddg&&has&&v===q;}}catch(e){{return false;}}}})()"
+    );
+    let already = transport
+        .send(&nissia_cdp::commands::RuntimeEvaluate {
+            expression: already_check,
+            return_by_value: Some(true),
+            await_promise: None,
+            context_id: None,
+        })
+        .await
+        .ok()
+        .and_then(|r| r.result.value)
+        == Some(Value::Bool(true));
+
+    // Human search: open DuckDuckGo, move+click the search box, TYPE the query and
+    // submit — instead of teleporting straight to a results URL. Falls back to the
+    // direct results URL if the box can't be operated, so search never breaks.
+    let typed = async {
+        if already {
+            return Ok::<(), nissia_cdp::CdpTransportError>(());
+        }
+        nissia_core::snap::execute(
+            &transport,
+            Some("https://html.duckduckgo.com/html/"),
+            None,
+            lang,
+            emu,
+        )
+        .await?;
+        nissia_core::action::wait::execute(
+            &transport,
+            nissia_core::action::wait::WaitCondition::Selector("input[name=q]"),
+        )
+        .await?;
+        nissia_core::action::click::execute_selector(&transport, "input[name=q]").await?;
+        nissia_core::action::type_text::execute_selector(&transport, "input[name=q]", query).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        // Submit: click the search button (DDG's /html/ form ignores Enter), with a
+        // human mouse trajectory. Press Enter too as a belt-and-suspenders.
+        let _ = nissia_core::action::key::execute(&transport, "enter").await;
+        let _ = nissia_core::action::click::execute_selector(
+            &transport,
+            "input[type=submit], button[type=submit]",
+        )
+        .await;
+        nissia_core::snap::wait_dom_ready(&transport, 8000).await;
+        Ok::<(), nissia_cdp::CdpTransportError>(())
+    }
+    .await;
+    if typed.is_err() {
+        let url =
+            reqwest::Url::parse_with_params("https://html.duckduckgo.com/html/", &[("q", query)])?;
+        let _ = nissia_core::snap::execute(&transport, Some(url.as_str()), None, lang, emu).await?;
+    }
     let js = format!(
         r#"JSON.stringify(Array.from(document.querySelectorAll('.result')).filter(function(r){{return !/result--ad|result--sponsored/.test(r.className)}}).map(function(r){{var a=r.querySelector('.result__a');var s=r.querySelector('.result__snippet');var h=a?a.href:'';try{{var u=new URL(h,location.href);var t=u.searchParams.get('uddg');if(t)h=decodeURIComponent(t);}}catch(e){{}}return{{title:a?a.innerText.trim():'',url:h,snippet:s?s.innerText.trim():''}}}}).filter(function(x){{return x.title && !/\/y\.js|duckduckgo\.com/.test(x.url)}}).slice(0,{n}))"#
     );
+    fn extract_hits(raw: &str) -> Vec<Hit> {
+        serde_json::from_str::<Vec<Value>>(raw)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|it| Hit {
+                title: it["title"].as_str().unwrap_or("").to_string(),
+                url: it["url"].as_str().unwrap_or("").to_string(),
+                snippet: it["snippet"].as_str().unwrap_or("").to_string(),
+            })
+            .collect()
+    }
+
     let result = transport
         .send(&nissia_cdp::commands::RuntimeEvaluate {
-            expression: js,
+            expression: js.clone(),
             return_by_value: Some(true),
             await_promise: Some(true),
             context_id: None,
         })
         .await?;
-    if let Some(exc) = result.exception_details {
-        bail!("DuckDuckGo extraction failed: {:?}", exc);
-    }
     let raw = match result.result.value {
         Some(Value::String(s)) => s,
         Some(other) => other.to_string(),
         None => "[]".to_string(),
     };
-    let items: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
-    let hits: Vec<Hit> = items
-        .into_iter()
-        .map(|it| Hit {
-            title: it["title"].as_str().unwrap_or("").to_string(),
-            url: it["url"].as_str().unwrap_or("").to_string(),
-            snippet: it["snippet"].as_str().unwrap_or("").to_string(),
-        })
-        .collect();
+    let mut hits: Vec<Hit> = extract_hits(&raw);
+
+    // Reliability: if the typed search came back empty (a timing hiccup or an odd
+    // phrasing), retry once via the direct results URL so search never silently
+    // returns nothing.
+    if hits.is_empty() {
+        if let Ok(url) =
+            reqwest::Url::parse_with_params("https://html.duckduckgo.com/html/", &[("q", query)])
+        {
+            let _ = nissia_core::snap::execute(&transport, Some(url.as_str()), None, lang, emu).await;
+            let result2 = transport
+                .send(&nissia_cdp::commands::RuntimeEvaluate {
+                    expression: js.clone(),
+                    return_by_value: Some(true),
+                    await_promise: Some(true),
+                    context_id: None,
+                })
+                .await?;
+            let raw2 = match result2.result.value {
+                Some(Value::String(s)) => s,
+                Some(other) => other.to_string(),
+                None => "[]".to_string(),
+            };
+            hits = extract_hits(&raw2);
+        }
+    }
 
     // Human navigation: optionally CLICK the chosen result with a real mouse click
     // (natural referrer from the search engine), instead of teleporting to the URL.
@@ -475,37 +560,9 @@ async fn ddg_browser(
         if let Some(Value::String(xystr)) = cr.result.value {
             if let Ok(xy) = serde_json::from_str::<Vec<f64>>(&xystr) {
                 if xy.len() == 2 {
-                    let (x, y) = (xy[0], xy[1]);
-                    tokio::time::sleep(std::time::Duration::from_millis(320)).await; // human pause before clicking
-                    let _ = transport
-                        .send(&nissia_cdp::commands::InputDispatchMouseEvent {
-                            event_type: "mouseMoved".to_string(),
-                            x,
-                            y,
-                            button: None,
-                            click_count: None,
-                        })
-                        .await;
-                    tokio::time::sleep(std::time::Duration::from_millis(90)).await;
-                    let _ = transport
-                        .send(&nissia_cdp::commands::InputDispatchMouseEvent {
-                            event_type: "mousePressed".to_string(),
-                            x,
-                            y,
-                            button: Some("left".to_string()),
-                            click_count: Some(1),
-                        })
-                        .await;
-                    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
-                    let _ = transport
-                        .send(&nissia_cdp::commands::InputDispatchMouseEvent {
-                            event_type: "mouseReleased".to_string(),
-                            x,
-                            y,
-                            button: Some("left".to_string()),
-                            click_count: Some(1),
-                        })
-                        .await;
+                    // human reading pause, then a real curved-trajectory mouse click
+                    tokio::time::sleep(std::time::Duration::from_millis(320)).await;
+                    let _ = nissia_core::action::click::human_click_at(&transport, xy[0], xy[1]).await;
                     nissia_core::snap::wait_dom_ready(&transport, 6000).await;
                 }
             }

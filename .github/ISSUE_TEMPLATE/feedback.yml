@@ -1,0 +1,43 @@
+name: "💡 Feedback & skill improvements"
+description: Share an idea, suggestion, or comment to improve nissia browser or the /nissia-browser skill.
+title: "[feedback] "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve **nissia browser**! Tell us what you'd like better.
+        For a quick comment or question, you can also use [Discussions](../../discussions).
+  - type: dropdown
+    id: area
+    attributes:
+      label: What is this about?
+      options:
+        - The /nissia-browser skill (modes, prompts, behavior)
+        - Human navigation (mouse, typing, scrolling, anti-bot)
+        - Closing pop-ups / cookie banners / ads
+        - Search (results quality, which results to open)
+        - Speed / token cost
+        - A specific website that didn't work
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your feedback or idea
+      description: What happened, or what would you like nissia to do better?
+      placeholder: "e.g. On site X the cookie banner wasn't closed; or: I'd like a mode that..."
+    validations:
+      required: true
+  - type: input
+    id: site
+    attributes:
+      label: Site / URL (optional)
+      description: If it's about a specific site, paste the URL.
+  - type: input
+    id: version
+    attributes:
+      label: nissia version (optional)
+      description: Output of `nissia --version`.
