@@ -235,6 +235,10 @@ enum Commands {
         /// free, no rate limits. Best for Agente/Navegar (reuses the open window).
         #[arg(long)]
         browser: bool,
+        /// Human navigation: after a --browser search, CLICK this result (1 = top) with a
+        /// real mouse click, landing on the page with a natural referrer (not a teleport).
+        #[arg(long)]
+        open: Option<usize>,
     },
 
     /// Show JSON Schema for a command's inputs and outputs
@@ -651,8 +655,9 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
             n,
             read,
             browser,
+            open,
         } => {
-            cmd::search::run(cli.port, &query, n, read, browser, fmt, &cli.lang, &emu).await?;
+            cmd::search::run(cli.port, &query, n, read, browser, open, fmt, &cli.lang, &emu).await?;
         }
         Commands::Schema { command } => {
             cmd::schema::run(command.as_deref(), fmt);

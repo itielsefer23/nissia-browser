@@ -254,7 +254,7 @@ async fn resolve_focus_bounds(
 /// Wait until the DOM is ready (document.readyState interactive/complete) instead of
 /// blocking on the full `load` event (which can take ~30s on ad-heavy pages). Polls
 /// readyState so it returns as soon as content exists, capped at `max_ms`.
-pub(crate) async fn wait_dom_ready(transport: &CdpTransport, max_ms: u64) {
+pub async fn wait_dom_ready(transport: &CdpTransport, max_ms: u64) {
     let start = std::time::Instant::now();
     loop {
         let r = transport

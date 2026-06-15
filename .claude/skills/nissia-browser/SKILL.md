@@ -63,6 +63,13 @@ if($w){[W]::ShowWindow($w.MainWindowHandle,3)|Out-Null;[W]::BringWindowToTop($w.
   corrélo **2 veces** para los tardíos. Cierra cookies/consent (OneTrust/Didomi/Sourcepoint/Quantcast,
   también dentro de iframes), modales, overlays y ads (outbrain/taboola). Después `nissia read`.
   Ej: `nissia snap <url>` → `nissia wait 1200` → `nissia dismiss` → `nissia dismiss` → `nissia read --focus main`.
+- **Abrí resultados como humano, NO por teletransporte.** Para entrar a un resultado de búsqueda
+  usá `nissia search "<q>" --browser --open N` (N=1 el primero): hace un **click de mouse real** en
+  el resultado, así el sitio ve el **referrer del buscador** (como una persona), en vez de navegar
+  directo a la URL. Flujo agente: `search --browser --open 1` → `wait 1200` → `dismiss` → `read`.
+- **Pausas de lectura (timing humano):** entre páginas dejá `nissia wait 1500` a `3000` (como si
+  leyeras); no saltes de sitio en sitio al instante. Para conseguir la URL de un resultado sin abrirlo,
+  `search --browser` (lista). Navegar a una URL que el usuario te DA es ok (un humano la teclea).
 - macOS/Linux: lanzá el navegador con los mismos flags. Google bloquea la búsqueda automatizada
   (CAPTCHA): buscá con `search --browser`, no en google.com.
 

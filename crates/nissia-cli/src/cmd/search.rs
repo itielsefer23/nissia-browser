@@ -42,20 +42,21 @@ pub async fn run(
     n: usize,
     read_top: bool,
     browser: bool,
+    open: Option<usize>,
     fmt: &str,
     lang: &str,
     emu: &EmulationOptions,
 ) -> Result<()> {
     let client = reqwest::Client::new();
     let mut hits = if browser {
-        ddg_browser(port, query, n, lang, emu).await?
+        ddg_browser(port, query, n, open, lang, emu).await?
     } else {
         fetch(&client, query, n).await?
     };
     // Reliability net: if the HTTP search came back empty (e.g. an engine rate-limited
     // us), fall back to a real (headless) browser DuckDuckGo search, which is reliable.
     if hits.is_empty() && !browser {
-        if let Ok(h) = ddg_browser(port, query, n, lang, emu).await {
+        if let Ok(h) = ddg_browser(port, query, n, None, lang, emu).await {
             hits = h;
         }
     }
@@ -418,6 +419,7 @@ async fn ddg_browser(
     port: u16,
     query: &str,
     n: usize,
+    open: Option<usize>,
     lang: &str,
     emu: &EmulationOptions,
 ) -> Result<Vec<Hit>> {
@@ -446,14 +448,71 @@ async fn ddg_browser(
         None => "[]".to_string(),
     };
     let items: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
-    Ok(items
+    let hits: Vec<Hit> = items
         .into_iter()
         .map(|it| Hit {
             title: it["title"].as_str().unwrap_or("").to_string(),
             url: it["url"].as_str().unwrap_or("").to_string(),
             snippet: it["snippet"].as_str().unwrap_or("").to_string(),
         })
-        .collect())
+        .collect();
+
+    // Human navigation: optionally CLICK the chosen result with a real mouse click
+    // (natural referrer from the search engine), instead of teleporting to the URL.
+    if let Some(rank) = open {
+        let idx = rank.saturating_sub(1);
+        let coord_js = format!(
+            r#"(function(){{var a=Array.from(document.querySelectorAll('.result')).filter(function(r){{return !/result--ad|result--sponsored/.test(r.className)}}).map(function(r){{return r.querySelector('.result__a')}}).filter(Boolean);var el=a[{idx}];if(!el)return '';el.scrollIntoView({{block:'center'}});var b=el.getBoundingClientRect();return JSON.stringify([b.left+b.width/2,b.top+b.height/2]);}})()"#
+        );
+        let cr = transport
+            .send(&nissia_cdp::commands::RuntimeEvaluate {
+                expression: coord_js,
+                return_by_value: Some(true),
+                await_promise: Some(true),
+                context_id: None,
+            })
+            .await?;
+        if let Some(Value::String(xystr)) = cr.result.value {
+            if let Ok(xy) = serde_json::from_str::<Vec<f64>>(&xystr) {
+                if xy.len() == 2 {
+                    let (x, y) = (xy[0], xy[1]);
+                    tokio::time::sleep(std::time::Duration::from_millis(320)).await; // human pause before clicking
+                    let _ = transport
+                        .send(&nissia_cdp::commands::InputDispatchMouseEvent {
+                            event_type: "mouseMoved".to_string(),
+                            x,
+                            y,
+                            button: None,
+                            click_count: None,
+                        })
+                        .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(90)).await;
+                    let _ = transport
+                        .send(&nissia_cdp::commands::InputDispatchMouseEvent {
+                            event_type: "mousePressed".to_string(),
+                            x,
+                            y,
+                            button: Some("left".to_string()),
+                            click_count: Some(1),
+                        })
+                        .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                    let _ = transport
+                        .send(&nissia_cdp::commands::InputDispatchMouseEvent {
+                            event_type: "mouseReleased".to_string(),
+                            x,
+                            y,
+                            button: Some("left".to_string()),
+                            click_count: Some(1),
+                        })
+                        .await;
+                    nissia_core::snap::wait_dom_ready(&transport, 6000).await;
+                }
+            }
+        }
+    }
+
+    Ok(hits)
 }
 
 /// SearXNG instance URL from search.json ("searxng_url"), if present.
