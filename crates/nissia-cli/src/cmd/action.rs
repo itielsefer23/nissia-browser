@@ -280,3 +280,33 @@ pub async fn run_eval(port: u16, expression: &str, fmt: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Close cookie/consent banners and remove blocking fixed overlays so the page can be read.
+pub async fn run_dismiss(port: u16, fmt: &str) -> Result<()> {
+    let transport = nissia_cdp::connect(port).await?;
+    let js = r#"(function(){var c=null;var rx=/^(aceptar|aceptar todo|aceptar y cerrar|accept|accept all|aceitar|aceitar todos|i agree|agree|consent|got it|entendido|de acuerdo|allow all|permitir|continuar)$/i;var b=[].slice.call(document.querySelectorAll('button,[role=button],a,input[type=button],input[type=submit]'));for(var i=0;i<b.length;i++){var t=((b[i].innerText||b[i].value||'')+'').trim();if(rx.test(t)){try{b[i].click();c=t;}catch(e){}break;}}var r=0;[].slice.call(document.querySelectorAll('div,section,aside,iframe')).forEach(function(e){try{var s=getComputedStyle(e);var fx=(s.position==='fixed'||s.position==='sticky');var big=e.offsetHeight>60&&e.offsetWidth>200;var z=parseInt(s.zIndex)||0;var id=((e.id||'')+' '+(e.className||'')+'').toLowerCase();var bn=/cookie|consent|gdpr|banner|modal|overlay|popup|paywall|newsletter|subscrib|interstitial|backdrop/.test(id);if((fx&&big&&z>=50)||(bn&&big)){e.remove();r++;}}catch(_){}});try{document.documentElement.style.overflow='auto';document.body.style.overflow='auto';}catch(e){}return JSON.stringify({accepted:c,removed:r});})()"#;
+    let result = transport
+        .send(&nissia_cdp::commands::RuntimeEvaluate {
+            expression: js.to_string(),
+            return_by_value: Some(true),
+            await_promise: Some(true),
+            context_id: None,
+        })
+        .await?;
+    let val = result.result.value.unwrap_or(serde_json::Value::Null);
+    let raw = match &val {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    if fmt == "json" {
+        println!("{raw}");
+    } else {
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+        let removed = parsed["removed"].as_i64().unwrap_or(0);
+        match parsed["accepted"].as_str() {
+            Some(a) => println!("dismissed {removed} overlays (accepted: {a})"),
+            None => println!("dismissed {removed} overlays"),
+        }
+    }
+    Ok(())
+}

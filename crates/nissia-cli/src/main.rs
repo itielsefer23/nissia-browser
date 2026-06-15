@@ -168,6 +168,9 @@ enum Commands {
         expression: String,
     },
 
+    /// Dismiss cookie banners, consent popups and blocking overlays so the page is readable.
+    Dismiss,
+
     /// Session management
     Session {
         #[command(subcommand)]
@@ -563,6 +566,9 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         }
         Commands::Eval { expression } => {
             cmd::action::run_eval(cli.port, &expression, fmt).await?;
+        }
+        Commands::Dismiss => {
+            cmd::action::run_dismiss(cli.port, fmt).await?;
         }
         Commands::Session { action } => match action {
             SessionAction::Save { name } => {

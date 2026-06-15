@@ -200,49 +200,83 @@ impl Drop for ManagedBrowser {
     }
 }
 
-/// Find Chrome/Chromium binary path.
+/// Find a Chromium-based browser. Honors CHROME_PATH, then NISSIA_BROWSER
+/// (chrome|edge|opera|chromium), else auto-detects Chrome, Edge, Opera, Chromium.
 fn find_chrome() -> CdpResult<String> {
-    let candidates = if cfg!(target_os = "macos") {
-        vec![
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-        ]
-    } else if cfg!(target_os = "linux") {
-        vec![
-            "google-chrome",
-            "google-chrome-stable",
-            "chromium",
-            "chromium-browser",
-        ]
-    } else {
-        vec![
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        ]
-    };
-
-    for candidate in &candidates {
-        if std::path::Path::new(candidate).exists() {
-            return Ok(candidate.to_string());
+    if let Ok(p) = std::env::var("CHROME_PATH") {
+        if std::path::Path::new(&p).exists() {
+            return Ok(p);
         }
     }
+    let prefer = std::env::var("NISSIA_BROWSER")
+        .unwrap_or_default()
+        .to_lowercase();
 
-    // Try PATH for Linux
-    if cfg!(target_os = "linux") {
-        for candidate in &candidates {
-            if Command::new("which")
-                .arg(candidate)
+    let (chrome, edge, opera, chromium): (Vec<String>, Vec<String>, Vec<String>, Vec<String>) =
+        if cfg!(target_os = "macos") {
+            (
+                vec!["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into()],
+                vec!["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge".into()],
+                vec!["/Applications/Opera.app/Contents/MacOS/Opera".into()],
+                vec!["/Applications/Chromium.app/Contents/MacOS/Chromium".into()],
+            )
+        } else if cfg!(target_os = "linux") {
+            (
+                vec!["google-chrome".into(), "google-chrome-stable".into()],
+                vec!["microsoft-edge".into(), "microsoft-edge-stable".into()],
+                vec!["opera".into()],
+                vec!["chromium".into(), "chromium-browser".into()],
+            )
+        } else {
+            let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+            (
+                vec![
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe".into(),
+                ],
+                vec![
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe".into(),
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe".into(),
+                ],
+                vec![
+                    format!(r"{local}\Programs\Opera\opera.exe"),
+                    format!(r"{local}\Programs\Opera\launcher.exe"),
+                    format!(r"{local}\Programs\Opera GX\opera.exe"),
+                    format!(r"{pf}\Opera\opera.exe"),
+                ],
+                vec![],
+            )
+        };
+
+    let exists = |c: &str| -> bool {
+        if std::path::Path::new(c).exists() {
+            return true;
+        }
+        if cfg!(target_os = "linux") {
+            return Command::new("which")
+                .arg(c)
                 .output()
                 .map(|o| o.status.success())
-                .unwrap_or(false)
-            {
-                return Ok(candidate.to_string());
-            }
+                .unwrap_or(false);
+        }
+        false
+    };
+    let first = |list: &[String]| list.iter().find(|c| exists(c)).cloned();
+
+    let order: Vec<&Vec<String>> = match prefer.as_str() {
+        "edge" => vec![&edge, &chrome, &opera, &chromium],
+        "opera" => vec![&opera, &chrome, &edge, &chromium],
+        "chromium" => vec![&chromium, &chrome, &edge, &opera],
+        _ => vec![&chrome, &edge, &opera, &chromium],
+    };
+    for list in order {
+        if let Some(p) = first(list) {
+            return Ok(p);
         }
     }
 
     Err(CdpTransportError::BrowserNotFound(
-        "Chrome/Chromium not found. Please install Chrome or set CHROME_PATH.".to_string(),
+        "No Chromium-based browser found (Chrome/Edge/Opera/Chromium). Set CHROME_PATH.".to_string(),
     ))
 }
