@@ -47,11 +47,18 @@ pub async fn run(
     emu: &EmulationOptions,
 ) -> Result<()> {
     let client = reqwest::Client::new();
-    let hits = if browser {
+    let mut hits = if browser {
         ddg_browser(port, query, n, lang, emu).await?
     } else {
         fetch(&client, query, n).await?
     };
+    // Reliability net: if the HTTP search came back empty (e.g. an engine rate-limited
+    // us), fall back to a real (headless) browser DuckDuckGo search, which is reliable.
+    if hits.is_empty() && !browser {
+        if let Ok(h) = ddg_browser(port, query, n, lang, emu).await {
+            hits = h;
+        }
+    }
 
     if fmt == "json" {
         println!("{}", serde_json::to_string(&hits)?);
