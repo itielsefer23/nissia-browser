@@ -35,10 +35,8 @@ pub async fn post_action_snap(
     .unwrap_or(false);
 
     if navigated {
-        // Navigation detected — wait for page load (3s timeout)
-        let _ = transport
-            .wait_for_event("Page.loadEventFired", Duration::from_secs(3))
-            .await;
+        // Navigation detected — wait for the DOM to be ready (fast).
+        crate::snap::wait_dom_ready(transport, 3000).await;
     } else {
         // No navigation — wait 300ms for SPA DOM mutations to settle
         tokio::time::sleep(Duration::from_millis(300)).await;

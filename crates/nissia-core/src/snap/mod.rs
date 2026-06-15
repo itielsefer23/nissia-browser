@@ -102,10 +102,8 @@ pub async fn execute(
             });
         }
 
-        // Wait for page load
-        transport
-            .wait_for_event("Page.loadEventFired", std::time::Duration::from_secs(30))
-            .await?;
+        // Wait for the DOM to be ready (fast: does not block on ads/images).
+        wait_dom_ready(transport, 6000).await;
     }
 
     // Extract elements and page context
@@ -250,4 +248,35 @@ async fn resolve_focus_bounds(
     let y_max = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
     Ok(Some([x_min, y_min, x_max - x_min, y_max - y_min]))
+}
+
+
+/// Wait until the DOM is ready (document.readyState interactive/complete) instead of
+/// blocking on the full `load` event (which can take ~30s on ad-heavy pages). Polls
+/// readyState so it returns as soon as content exists, capped at `max_ms`.
+pub(crate) async fn wait_dom_ready(transport: &CdpTransport, max_ms: u64) {
+    let start = std::time::Instant::now();
+    loop {
+        let r = transport
+            .send(&nissia_cdp::commands::RuntimeEvaluate {
+                expression: "document.readyState".to_string(),
+                return_by_value: Some(true),
+                await_promise: None,
+                context_id: None,
+            })
+            .await;
+        if let Ok(resp) = r {
+            if let Some(serde_json::Value::String(st)) = resp.result.value {
+                if st == "interactive" || st == "complete" {
+                    break;
+                }
+            }
+        }
+        if start.elapsed().as_millis() as u64 >= max_ms {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    }
+    // brief settle for late-rendered content / SPA hydration
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 }

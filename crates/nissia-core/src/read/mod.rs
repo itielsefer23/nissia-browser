@@ -184,9 +184,7 @@ pub async fn execute(
             });
         }
 
-        transport
-            .wait_for_event("Page.loadEventFired", std::time::Duration::from_secs(30))
-            .await?;
+        crate::snap::wait_dom_ready(transport, 6000).await;
     }
 
     // Run the content extractor JS
