@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "nissia"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "nissia-cdp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dirs",
  "futures-util",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "nissia-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dirs",
  "nissia-cdp",

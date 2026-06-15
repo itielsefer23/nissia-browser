@@ -419,7 +419,7 @@ async fn call_tool(name: &str, args: &Value, port: u16) -> Result<String> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("default");
             let profile_dir = nissia_core::data_dir().join("profiles").join(profile_name);
-            let browser = nissia_cdp::ManagedBrowser::launch(port, headless, &profile_dir)
+            let browser = nissia_cdp::ManagedBrowser::launch(port, headless, &profile_dir, None)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let pid = browser.pid();
             std::fs::write(&pid_path, pid.to_string())?;

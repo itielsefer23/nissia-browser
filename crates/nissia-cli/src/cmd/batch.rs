@@ -9,11 +9,19 @@
 //!   read [selector]       page text as markdown (focused if selector given)
 //!   eval <js...>          run JS (rest of line), print result
 //!   click @eN
+//!   clicksel <css>        real mouse click on a CSS selector (calendar cells, grids)
+//!   key <name>            press enter|tab|escape|arrowdown|... (submit, autocomplete)
 //!   fill @eN <value...>
 //!   type @eN <text...>
+//!   typesel <css> => <text>  human-type into a CSS selector (no @eN snap needed).
+//!                            Use " => " to separate (the selector may contain spaces).
 //!   select @eN <value...>
 //!   scroll [up|down]
-//!   wait <ms>
+//!   dismiss               close cookie/consent banners + blocking overlays
+//!   reload [hard]         refresh the page and wait for DOM ready (human recovery)
+//!   wait <ms>             fixed pause (use sparingly)
+//!   waitfor <css>         ADAPTIVE: wait until selector appears (max 10s) — prefer this
+//!   waitgone <css>        wait until selector disappears, e.g. a spinner (max 15s)
 //!
 //! Element refs (@eN) persist across steps within the batch. Actions do NOT auto
 //! re-snap (cheap by default): add an explicit `snap`/`read`/`eval` line to observe.
@@ -110,6 +118,23 @@ async fn exec_line(
             nissia_core::action::click::execute(transport, rest).await?;
             Ok("ok".to_string())
         }
+        "clicksel" => {
+            nissia_core::action::click::execute_selector(transport, rest).await?;
+            Ok("ok".to_string())
+        }
+        "key" => {
+            nissia_core::action::key::execute(transport, rest).await?;
+            Ok("ok".to_string())
+        }
+        "dismiss" => {
+            let raw = nissia_core::action::dismiss::execute(transport).await?;
+            Ok(raw)
+        }
+        "reload" => {
+            let hard = rest.eq_ignore_ascii_case("hard");
+            nissia_core::action::reload::execute(transport, hard).await?;
+            Ok("ok".to_string())
+        }
         "fill" => {
             let (r, v) = split2(rest);
             nissia_core::action::fill::execute(transport, r, v).await?;
@@ -118,6 +143,17 @@ async fn exec_line(
         "type" => {
             let (r, v) = split2(rest);
             nissia_core::action::type_text::execute(transport, r, v).await?;
+            Ok("ok".to_string())
+        }
+        "typesel" => {
+            // The selector itself can contain spaces (e.g. [aria-label*="dónde quieres"]),
+            // so split selector from text on " => " (fall back to first space only if the
+            // delimiter is absent and the selector is simple).
+            let (sel, v) = match rest.split_once(" => ") {
+                Some((s, t)) => (s.trim(), t.trim()),
+                None => split2(rest),
+            };
+            nissia_core::action::type_text::execute_selector(transport, sel, v).await?;
             Ok("ok".to_string())
         }
         "select" => {
@@ -134,6 +170,22 @@ async fn exec_line(
             let ms: u64 = rest.parse().unwrap_or(500);
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
             Ok(String::new())
+        }
+        "waitfor" => {
+            nissia_core::action::wait::execute(
+                transport,
+                nissia_core::action::wait::WaitCondition::Selector(rest),
+            )
+            .await?;
+            Ok("ready".to_string())
+        }
+        "waitgone" => {
+            nissia_core::action::wait::execute(
+                transport,
+                nissia_core::action::wait::WaitCondition::SelectorGone(rest),
+            )
+            .await?;
+            Ok("gone".to_string())
         }
         other => bail!("unknown batch verb '{other}'"),
     }

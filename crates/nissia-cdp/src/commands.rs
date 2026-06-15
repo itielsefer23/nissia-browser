@@ -170,6 +170,30 @@ impl CdpCommand for PageCaptureScreenshot {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageReload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore_cache: Option<bool>,
+}
+
+impl CdpCommand for PageReload {
+    type Response = serde_json::Value;
+    fn method_name(&self) -> &'static str {
+        "Page.reload"
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PageBringToFront {}
+
+impl CdpCommand for PageBringToFront {
+    type Response = serde_json::Value;
+    fn method_name(&self) -> &'static str {
+        "Page.bringToFront"
+    }
+}
+
 // ============================================================
 // DOM domain
 // ============================================================

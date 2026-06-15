@@ -8,6 +8,8 @@ use nissia_cdp::CdpTransport;
 pub enum WaitCondition<'a> {
     Navigation,
     Selector(&'a str),
+    /// Wait until a selector is GONE (e.g. a loading spinner disappears).
+    SelectorGone(&'a str),
     Timeout(u64),
 }
 
@@ -46,6 +48,38 @@ pub async fn execute(
                 if start.elapsed() > timeout {
                     return Err(nissia_cdp::CdpTransportError::Timeout {
                         method: format!("wait for selector: {selector}"),
+                        timeout_ms: timeout.as_millis() as u64,
+                    });
+                }
+
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+        WaitCondition::SelectorGone(selector) => {
+            let timeout = Duration::from_secs(15);
+            let start = std::time::Instant::now();
+
+            loop {
+                let js = format!(
+                    "document.querySelector({}) === null",
+                    serde_json::to_string(selector).unwrap()
+                );
+                let resp = transport
+                    .send(&RuntimeEvaluate {
+                        expression: js,
+                        return_by_value: Some(true),
+                        await_promise: None,
+                        context_id: None,
+                    })
+                    .await?;
+
+                if resp.result.value == Some(serde_json::Value::Bool(true)) {
+                    return Ok(());
+                }
+
+                if start.elapsed() > timeout {
+                    return Err(nissia_cdp::CdpTransportError::Timeout {
+                        method: format!("wait for selector gone: {selector}"),
                         timeout_ms: timeout.as_millis() as u64,
                     });
                 }

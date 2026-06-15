@@ -1,5 +1,8 @@
 pub mod click;
+pub mod dismiss;
 pub mod fill;
+pub mod key;
+pub mod reload;
 pub mod screenshot;
 pub mod scroll;
 pub mod select;

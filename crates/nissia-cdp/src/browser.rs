@@ -131,40 +131,75 @@ pub struct ManagedBrowser {
 }
 
 impl ManagedBrowser {
-    /// Launch Chrome with remote debugging enabled.
-    /// `user_data_dir` controls the Chrome profile directory.
-    /// Persistent profiles keep cookies/history between sessions, reducing bot detection.
-    pub fn launch(port: u16, headless: bool, user_data_dir: &std::path::Path) -> CdpResult<Self> {
-        let chrome_path = find_chrome()?;
+    /// Launch a Chromium-based browser with remote debugging enabled.
+    /// `user_data_dir` controls the profile directory (persistent profiles keep
+    /// cookies/history between sessions, reducing bot detection). `prefer` picks
+    /// the browser (chrome|edge|opera|brave|chromium); None = auto-detect.
+    /// When `headless` is false the window opens maximized in a fresh window
+    /// (the "Agente" visible mode), so the user can watch it work.
+    pub fn launch(
+        port: u16,
+        headless: bool,
+        user_data_dir: &std::path::Path,
+        prefer: Option<&str>,
+    ) -> CdpResult<Self> {
+        let chrome_path = find_chrome(prefer)?;
         std::fs::create_dir_all(user_data_dir).ok();
 
         // Minimal flags only — avoid bot-detection signals.
         // Removed: --disable-background-networking, --disable-sync, --disable-translate,
         //          --metrics-recording-only, --safebrowsing-disable-auto-update
         // These flags are common bot fingerprints that trigger CAPTCHA on Amazon etc.
+        //
+        // IMPORTANT: we do NOT add --disable-blink-features=AutomationControlled in the
+        // visible window. Recent Chrome shows a yellow "unsupported command-line flag"
+        // infobar for it — a visible "you are automated" tell, the opposite of stealth.
+        // We don't pass --enable-automation either, so navigator.webdriver stays false
+        // on its own; for headless we add the flag (no UI there) plus a JS override at
+        // connect time (see transport) as a belt-and-suspenders.
         let mut args = vec![
             format!("--remote-debugging-port={port}"),
             format!("--user-data-dir={}", user_data_dir.display()),
             "--no-first-run".to_string(),
             "--no-default-browser-check".to_string(),
-            "--disable-blink-features=AutomationControlled".to_string(),
         ];
 
         if headless {
             args.push("--headless=new".to_string());
             args.push("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".to_string());
+            args.push("--disable-blink-features=AutomationControlled".to_string());
+        } else {
+            // Visible "Agente" window: maximized, fresh window, no translate nag, and
+            // no "restore pages?" bubble after our taskkill stop (unclean exit).
+            args.push("--start-maximized".to_string());
+            args.push("--new-window".to_string());
+            args.push("--disable-features=Translate,TranslateUI".to_string());
+            args.push("--hide-crash-restore-bubble".to_string());
+            args.push("about:blank".to_string());
         }
 
-        let child = Command::new(&chrome_path)
-            .args(&args)
+        let mut cmd = Command::new(&chrome_path);
+        cmd.args(&args)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| {
-                CdpTransportError::BrowserNotFound(format!(
-                    "Failed to launch Chrome at {chrome_path}: {e}"
-                ))
-            })?;
+            .stderr(std::process::Stdio::null());
+
+        // On Windows, detach the child so it does NOT inherit the caller's console
+        // or pipe handles — otherwise a `browser launch --background` invoked by the
+        // skill would keep the calling shell's stdout pipe open and appear to hang.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        }
+
+        let child = cmd.spawn().map_err(|e| {
+            CdpTransportError::BrowserNotFound(format!(
+                "Failed to launch browser at {chrome_path}: {e}"
+            ))
+        })?;
 
         Ok(Self { child, port })
     }
@@ -200,83 +235,114 @@ impl Drop for ManagedBrowser {
     }
 }
 
-/// Find a Chromium-based browser. Honors CHROME_PATH, then NISSIA_BROWSER
-/// (chrome|edge|opera|chromium), else auto-detects Chrome, Edge, Opera, Chromium.
-fn find_chrome() -> CdpResult<String> {
+/// Per-OS candidate executable paths for each supported browser, in the order
+/// (chrome, edge, opera, brave, chromium). Cross-platform: macOS / Linux / Windows.
+fn browser_candidates() -> Vec<(&'static str, Vec<String>)> {
+    if cfg!(target_os = "macos") {
+        vec![
+            ("chrome", vec!["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into()]),
+            ("edge", vec!["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge".into()]),
+            ("opera", vec!["/Applications/Opera.app/Contents/MacOS/Opera".into()]),
+            ("brave", vec!["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser".into()]),
+            ("chromium", vec!["/Applications/Chromium.app/Contents/MacOS/Chromium".into()]),
+        ]
+    } else if cfg!(target_os = "linux") {
+        vec![
+            ("chrome", vec!["google-chrome".into(), "google-chrome-stable".into()]),
+            ("edge", vec!["microsoft-edge".into(), "microsoft-edge-stable".into()]),
+            ("opera", vec!["opera".into()]),
+            ("brave", vec!["brave-browser".into(), "brave".into()]),
+            ("chromium", vec!["chromium".into(), "chromium-browser".into()]),
+        ]
+    } else {
+        let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+        let pf86 = std::env::var("ProgramFiles(x86)")
+            .unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+        vec![
+            ("chrome", vec![
+                format!(r"{pf}\Google\Chrome\Application\chrome.exe"),
+                format!(r"{pf86}\Google\Chrome\Application\chrome.exe"),
+                format!(r"{local}\Google\Chrome\Application\chrome.exe"),
+            ]),
+            ("edge", vec![
+                format!(r"{pf86}\Microsoft\Edge\Application\msedge.exe"),
+                format!(r"{pf}\Microsoft\Edge\Application\msedge.exe"),
+            ]),
+            ("opera", vec![
+                format!(r"{local}\Programs\Opera\opera.exe"),
+                format!(r"{local}\Programs\Opera\launcher.exe"),
+                format!(r"{local}\Programs\Opera GX\opera.exe"),
+                format!(r"{pf}\Opera\opera.exe"),
+            ]),
+            ("brave", vec![
+                format!(r"{pf}\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                format!(r"{pf86}\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                format!(r"{local}\BraveSoftware\Brave-Browser\Application\brave.exe"),
+            ]),
+            ("chromium", vec![format!(r"{local}\Chromium\Application\chrome.exe")]),
+        ]
+    }
+}
+
+fn path_exists(c: &str) -> bool {
+    if std::path::Path::new(c).exists() {
+        return true;
+    }
+    // On Linux the candidate may be a bare command name on PATH.
+    if cfg!(target_os = "linux") {
+        return Command::new("which")
+            .arg(c)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+    }
+    false
+}
+
+/// Detect installed Chromium-based browsers on this machine.
+/// Returns `(name, path)` for each one found (deduped, in canonical order).
+pub fn detect_browsers() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (name, paths) in browser_candidates() {
+        if let Some(p) = paths.iter().find(|c| path_exists(c)) {
+            out.push((name.to_string(), p.clone()));
+        }
+    }
+    out
+}
+
+/// Find a Chromium-based browser. Honors CHROME_PATH, then the `prefer` argument,
+/// then the NISSIA_BROWSER env var (chrome|edge|opera|brave|chromium), else
+/// auto-detects in canonical order. Cross-platform.
+fn find_chrome(prefer: Option<&str>) -> CdpResult<String> {
     if let Ok(p) = std::env::var("CHROME_PATH") {
         if std::path::Path::new(&p).exists() {
             return Ok(p);
         }
     }
-    let prefer = std::env::var("NISSIA_BROWSER")
-        .unwrap_or_default()
-        .to_lowercase();
+    let prefer = prefer
+        .map(|s| s.to_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| std::env::var("NISSIA_BROWSER").unwrap_or_default().to_lowercase());
 
-    let (chrome, edge, opera, chromium): (Vec<String>, Vec<String>, Vec<String>, Vec<String>) =
-        if cfg!(target_os = "macos") {
-            (
-                vec!["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into()],
-                vec!["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge".into()],
-                vec!["/Applications/Opera.app/Contents/MacOS/Opera".into()],
-                vec!["/Applications/Chromium.app/Contents/MacOS/Chromium".into()],
-            )
-        } else if cfg!(target_os = "linux") {
-            (
-                vec!["google-chrome".into(), "google-chrome-stable".into()],
-                vec!["microsoft-edge".into(), "microsoft-edge-stable".into()],
-                vec!["opera".into()],
-                vec!["chromium".into(), "chromium-browser".into()],
-            )
-        } else {
-            let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
-            let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
-            (
-                vec![
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
-                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe".into(),
-                ],
-                vec![
-                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe".into(),
-                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe".into(),
-                ],
-                vec![
-                    format!(r"{local}\Programs\Opera\opera.exe"),
-                    format!(r"{local}\Programs\Opera\launcher.exe"),
-                    format!(r"{local}\Programs\Opera GX\opera.exe"),
-                    format!(r"{pf}\Opera\opera.exe"),
-                ],
-                vec![],
-            )
-        };
-
-    let exists = |c: &str| -> bool {
-        if std::path::Path::new(c).exists() {
-            return true;
+    let candidates = browser_candidates();
+    // Try the preferred browser first, then fall back to canonical order.
+    if !prefer.is_empty() {
+        if let Some((_, paths)) = candidates.iter().find(|(n, _)| *n == prefer) {
+            if let Some(p) = paths.iter().find(|c| path_exists(c)) {
+                return Ok(p.clone());
+            }
         }
-        if cfg!(target_os = "linux") {
-            return Command::new("which")
-                .arg(c)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-        }
-        false
-    };
-    let first = |list: &[String]| list.iter().find(|c| exists(c)).cloned();
-
-    let order: Vec<&Vec<String>> = match prefer.as_str() {
-        "edge" => vec![&edge, &chrome, &opera, &chromium],
-        "opera" => vec![&opera, &chrome, &edge, &chromium],
-        "chromium" => vec![&chromium, &chrome, &edge, &opera],
-        _ => vec![&chrome, &edge, &opera, &chromium],
-    };
-    for list in order {
-        if let Some(p) = first(list) {
-            return Ok(p);
+    }
+    for (_, paths) in &candidates {
+        if let Some(p) = paths.iter().find(|c| path_exists(c)) {
+            return Ok(p.clone());
         }
     }
 
     Err(CdpTransportError::BrowserNotFound(
-        "No Chromium-based browser found (Chrome/Edge/Opera/Chromium). Set CHROME_PATH.".to_string(),
+        "No Chromium-based browser found (Chrome/Edge/Opera/Brave/Chromium). Set CHROME_PATH."
+            .to_string(),
     ))
 }

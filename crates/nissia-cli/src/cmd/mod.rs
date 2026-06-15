@@ -10,6 +10,7 @@ pub mod schema;
 pub mod search;
 pub mod session;
 pub mod snap;
+pub mod update;
 
 use anyhow::{bail, Context, Result};
 

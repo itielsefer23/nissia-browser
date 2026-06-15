@@ -1,5 +1,5 @@
 # nissia installer for Windows
-# Usage: irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 

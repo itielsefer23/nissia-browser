@@ -5,11 +5,13 @@ fn pid_file(port: u16) -> PathBuf {
     nissia_core::data_dir().join(format!("chrome-{port}.pid"))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_launch(
     port: u16,
     headless: bool,
     background: bool,
     profile: Option<&str>,
+    browser: Option<&str>,
     idle_timeout: Option<u32>,
     fmt: &str,
 ) -> Result<()> {
@@ -33,8 +35,8 @@ pub fn run_launch(
     // Persistent profile directory — keeps cookies/state between sessions
     let profile_name = profile.unwrap_or("default");
     let profile_dir = nissia_core::data_dir().join("profiles").join(profile_name);
-    let browser = nissia_cdp::ManagedBrowser::launch(port, headless, &profile_dir)?;
-    let pid = browser.pid();
+    let managed = nissia_cdp::ManagedBrowser::launch(port, headless, &profile_dir, browser)?;
+    let pid = managed.pid();
 
     // Save PID to file
     std::fs::write(pid_file(port), pid.to_string())?;
@@ -65,8 +67,8 @@ pub fn run_launch(
     }
 
     if background {
-        // Detach — let Chrome run independently
-        std::mem::forget(browser);
+        // Detach — let the browser run independently
+        std::mem::forget(managed);
     } else {
         println!("Press Ctrl+C to stop");
         std::thread::park();
@@ -172,20 +174,84 @@ fn read_pid(port: u16) -> Option<u32> {
 }
 
 fn is_process_alive(pid: u32) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    #[cfg(windows)]
+    {
+        // tasklist prints "INFO: No tasks..." when the PID is not running.
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output();
+        if let Ok(o) = out {
+            let s = String::from_utf8_lossy(&o.stdout);
+            return s.lines().any(|l| l.contains(&format!("\"{pid}\"")));
+        }
+        return false;
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 fn kill_process(pid: u32) {
-    std::process::Command::new("kill")
-        .arg(pid.to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .ok();
+    #[cfg(windows)]
+    {
+        // /T also kills child processes (Chrome spawns several).
+        std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok();
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok();
+    }
+}
+
+/// Bring the visible browser tab/window to the front (cross-platform via CDP
+/// `Page.bringToFront`). Used by the "Agente" mode so the user actually sees the
+/// page update, and to recover focus after long command sequences.
+pub async fn run_focus(port: u16, fmt: &str) -> Result<()> {
+    let transport = nissia_cdp::connect(port).await?;
+    transport
+        .send(&nissia_cdp::commands::PageBringToFront {})
+        .await?;
+    if fmt == "json" {
+        println!("{}", serde_json::json!({"status": "ok", "action": "focus"}));
+    } else {
+        println!("ok");
+    }
+    Ok(())
+}
+
+/// List Chromium-based browsers installed on this machine (so the skill can ask
+/// the user which one to use). Cross-platform.
+pub fn run_detect(fmt: &str) -> Result<()> {
+    let found = nissia_cdp::detect_browsers();
+    if fmt == "json" {
+        let arr: Vec<serde_json::Value> = found
+            .iter()
+            .map(|(n, p)| serde_json::json!({"name": n, "path": p}))
+            .collect();
+        println!("{}", serde_json::json!({"browsers": arr}));
+    } else if found.is_empty() {
+        println!("(no Chromium-based browser found — install Chrome, Edge, Brave or Opera)");
+    } else {
+        for (n, p) in &found {
+            println!("{n}\t{p}");
+        }
+    }
+    Ok(())
 }

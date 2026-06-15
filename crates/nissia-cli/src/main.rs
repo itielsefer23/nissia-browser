@@ -75,12 +75,18 @@ enum Commands {
         max_lines: usize,
     },
 
-    /// Click an element by @eN reference from snap output.
+    /// Click an element by @eN reference from snap output, or by CSS selector
+    /// with --sel (real mouse click; works on calendar cells / grids / widgets
+    /// that the snapshot does not index).
     /// Returns updated page snapshot automatically (use --no-snap to disable).
     Click {
-        /// Element reference from snap (e.g. @e1)
+        /// Element reference from snap (e.g. @e1). Omit when using --sel.
         #[arg(name = "ref")]
-        element_ref: String,
+        element_ref: Option<String>,
+
+        /// CSS selector to click with a real mouse click (e.g. "[aria-label='25 de julio de 2026']").
+        #[arg(long)]
+        sel: Option<String>,
 
         /// Skip automatic re-snap after action
         #[arg(long)]
@@ -171,6 +177,14 @@ enum Commands {
     /// Dismiss cookie banners, consent popups and blocking overlays so the page is readable.
     Dismiss,
 
+    /// Reload the current page and wait for it to be ready. The human recovery move
+    /// when a site errors, half-loads or hangs: refresh and try again.
+    Reload {
+        /// Bypass the HTTP cache (hard reload)
+        #[arg(long)]
+        hard: bool,
+    },
+
     /// Press a key: enter, tab, escape, backspace, arrowup/down/left/right, space, etc.
     /// Submit a search (enter), move between fields (tab), or pick an autocomplete
     /// suggestion (arrowdown then enter).
@@ -258,6 +272,15 @@ enum Commands {
     /// Write AGENTS.md to the current directory for AI coding agent skill discovery.
     /// Run this once in your project to enable Claude Code, Codex, opencode, etc.
     Init,
+
+    /// Check whether a newer nissia is published (GitHub release). Cached 24h.
+    /// `--check` is the cheap, quiet form for skill startup (prints only if an
+    /// update exists); a bare `update` forces a fresh check and prints instructions.
+    Update {
+        /// Quiet cached check: print only when an update is available
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -289,9 +312,10 @@ enum RecordAction {
 
 #[derive(Subcommand)]
 enum BrowserAction {
-    /// Launch Chrome with remote debugging. Use --background for agent use
+    /// Launch a Chromium browser with remote debugging. Use --background for agent
+    /// use. Without --headless it opens a VISIBLE maximized window (Agente mode).
     Launch {
-        /// Run in headless mode
+        /// Run in headless mode (no window) — for the internal Search/Navegar modes
         #[arg(long)]
         headless: bool,
 
@@ -304,15 +328,24 @@ enum BrowserAction {
         #[arg(long)]
         profile: Option<String>,
 
-        /// Auto-stop Chrome after N minutes of inactivity (no nissia commands).
-        /// Recommended for AI agent sessions to prevent orphaned Chrome processes.
+        /// Which browser to use: chrome | edge | opera | brave | chromium.
+        /// Omit to auto-detect. See `nissia browser detect`.
+        #[arg(long)]
+        browser: Option<String>,
+
+        /// Auto-stop the browser after N minutes of inactivity (no nissia commands).
+        /// Recommended for AI agent sessions to prevent orphaned processes.
         #[arg(long)]
         idle_timeout: Option<u32>,
     },
-    /// Stop a running Chrome instance
+    /// Stop a running browser instance
     Stop,
-    /// Check if Chrome is running
+    /// Check if a browser is running
     Status,
+    /// Bring the visible browser window/tab to the front (Agente mode)
+    Focus,
+    /// List Chromium-based browsers installed on this machine
+    Detect,
 }
 
 const AGENT_GUIDE: &str = "\
@@ -480,12 +513,18 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         }
         Commands::Click {
             element_ref,
+            sel,
             no_snap,
         } => {
-            validate::element_ref(&element_ref)?;
+            if let Some(ref r) = element_ref {
+                validate::element_ref(r)?;
+            } else if sel.is_none() {
+                anyhow::bail!("click needs either an @eN reference or --sel <css>");
+            }
             cmd::action::run_click(
                 cli.port,
-                &element_ref,
+                element_ref.as_deref(),
+                sel.as_deref(),
                 fmt,
                 cli.dry_run,
                 no_snap,
@@ -582,6 +621,9 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         Commands::Dismiss => {
             cmd::action::run_dismiss(cli.port, fmt).await?;
         }
+        Commands::Reload { hard } => {
+            cmd::action::run_reload(cli.port, hard, fmt).await?;
+        }
         Commands::Key { key } => {
             cmd::action::run_key(cli.port, &key, fmt).await?;
         }
@@ -621,6 +663,7 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                 headless,
                 background,
                 profile,
+                browser,
                 idle_timeout,
             } => {
                 cmd::browser::run_launch(
@@ -628,6 +671,7 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                     headless,
                     background,
                     profile.as_deref(),
+                    browser.as_deref(),
                     idle_timeout,
                     fmt,
                 )?;
@@ -637,6 +681,12 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
             }
             BrowserAction::Status => {
                 cmd::browser::run_status(cli.port, fmt)?;
+            }
+            BrowserAction::Focus => {
+                cmd::browser::run_focus(cli.port, fmt).await?;
+            }
+            BrowserAction::Detect => {
+                cmd::browser::run_detect(fmt)?;
             }
         },
         Commands::Mcp => {
@@ -706,6 +756,9 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                 }
                 println!("\nWorkflows will be saved to .nissia/workflows/ (project scope).");
             }
+        }
+        Commands::Update { check } => {
+            cmd::update::run(check, fmt).await?;
         }
     }
 
