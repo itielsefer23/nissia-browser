@@ -228,6 +228,10 @@ enum Commands {
         /// Also read the top result as focused markdown
         #[arg(long)]
         read: bool,
+        /// Search inside the running browser (DuckDuckGo) instead of HTTP. Reliable,
+        /// free, no rate limits. Best for Agente/Navegar (reuses the open window).
+        #[arg(long)]
+        browser: bool,
     },
 
     /// Show JSON Schema for a command's inputs and outputs
@@ -636,8 +640,13 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         Commands::Batch => {
             cmd::batch::run(cli.port, &cli.lang, &emu).await?;
         }
-        Commands::Search { query, n, read } => {
-            cmd::search::run(cli.port, &query, n, read, fmt, &cli.lang, &emu).await?;
+        Commands::Search {
+            query,
+            n,
+            read,
+            browser,
+        } => {
+            cmd::search::run(cli.port, &query, n, read, browser, fmt, &cli.lang, &emu).await?;
         }
         Commands::Schema { command } => {
             cmd::schema::run(command.as_deref(), fmt);

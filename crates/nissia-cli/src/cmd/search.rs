@@ -41,12 +41,17 @@ pub async fn run(
     query: &str,
     n: usize,
     read_top: bool,
+    browser: bool,
     fmt: &str,
     lang: &str,
     emu: &EmulationOptions,
 ) -> Result<()> {
     let client = reqwest::Client::new();
-    let hits = fetch(&client, query, n).await?;
+    let hits = if browser {
+        ddg_browser(port, query, n, lang, emu).await?
+    } else {
+        fetch(&client, query, n).await?
+    };
 
     if fmt == "json" {
         println!("{}", serde_json::to_string(&hits)?);
@@ -162,6 +167,13 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
         }
         "mojeek" => mojeek(client, query, n).await,
         "ddg" => ddg_instant(client, query, n).await,
+        "searxng" => {
+            let base = std::env::var("NISSIA_SEARXNG_URL")
+                .ok()
+                .or_else(cfg_searxng_url)
+                .context("set NISSIA_SEARXNG_URL (or \"searxng_url\" in search.json) to your SearXNG instance, e.g. http://localhost:8888")?;
+            searxng(client, &base, query, n).await
+        }
         "brave" | "serper" | "tavily" => {
             let k = key.context("NISSIA_SEARCH_API_KEY (o search.json) requerido para este proveedor")?;
             let hits = match provider.as_str() {
@@ -173,7 +185,7 @@ async fn fetch(client: &reqwest::Client, query: &str, n: usize) -> Result<Vec<Hi
             Ok(hits)
         }
         other => bail!(
-            "unknown NISSIA_SEARCH_PROVIDER '{other}' (use: auto | mojeek | ddg | brave | serper | tavily)"
+            "unknown NISSIA_SEARCH_PROVIDER '{other}' (use: auto | mojeek | ddg | searxng | brave | serper | tavily)"
         ),
     }
 }
@@ -380,6 +392,88 @@ async fn tavily(client: &reqwest::Client, query: &str, n: usize, key: &str) -> R
         .json()
         .await
         .context("Tavily response was not JSON")?;
+    let mut hits = Vec::new();
+    if let Some(arr) = v["results"].as_array() {
+        for it in arr.iter().take(n) {
+            hits.push(Hit {
+                title: it["title"].as_str().unwrap_or("").to_string(),
+                url: it["url"].as_str().unwrap_or("").to_string(),
+                snippet: it["content"].as_str().unwrap_or("").to_string(),
+            });
+        }
+    }
+    Ok(hits)
+}
+
+/// Free, reliable web search via the RUNNING browser (DuckDuckGo HTML), ads filtered.
+/// Works without any API key because it is a real browser; no HTTP rate limits.
+async fn ddg_browser(
+    port: u16,
+    query: &str,
+    n: usize,
+    lang: &str,
+    emu: &EmulationOptions,
+) -> Result<Vec<Hit>> {
+    super::ensure_browser(port).await?;
+    let transport = nissia_cdp::connect(port).await?;
+    transport.send(&nissia_cdp::commands::PageEnable {}).await?;
+    let url = reqwest::Url::parse_with_params("https://html.duckduckgo.com/html/", &[("q", query)])?;
+    let _ = nissia_core::snap::execute(&transport, Some(url.as_str()), None, lang, emu).await?;
+    let js = format!(
+        r#"JSON.stringify(Array.from(document.querySelectorAll('.result')).filter(function(r){{return !/result--ad|result--sponsored/.test(r.className)}}).map(function(r){{var a=r.querySelector('.result__a');var s=r.querySelector('.result__snippet');var h=a?a.href:'';try{{var u=new URL(h,location.href);var t=u.searchParams.get('uddg');if(t)h=decodeURIComponent(t);}}catch(e){{}}return{{title:a?a.innerText.trim():'',url:h,snippet:s?s.innerText.trim():''}}}}).filter(function(x){{return x.title && !/\/y\.js|duckduckgo\.com/.test(x.url)}}).slice(0,{n}))"#
+    );
+    let result = transport
+        .send(&nissia_cdp::commands::RuntimeEvaluate {
+            expression: js,
+            return_by_value: Some(true),
+            await_promise: Some(true),
+            context_id: None,
+        })
+        .await?;
+    if let Some(exc) = result.exception_details {
+        bail!("DuckDuckGo extraction failed: {:?}", exc);
+    }
+    let raw = match result.result.value {
+        Some(Value::String(s)) => s,
+        Some(other) => other.to_string(),
+        None => "[]".to_string(),
+    };
+    let items: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
+    Ok(items
+        .into_iter()
+        .map(|it| Hit {
+            title: it["title"].as_str().unwrap_or("").to_string(),
+            url: it["url"].as_str().unwrap_or("").to_string(),
+            snippet: it["snippet"].as_str().unwrap_or("").to_string(),
+        })
+        .collect())
+}
+
+/// SearXNG instance URL from search.json ("searxng_url"), if present.
+fn cfg_searxng_url() -> Option<String> {
+    let path = nissia_core::data_dir().join("search.json");
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["searxng_url"].as_str().map(|s| s.to_string()))
+}
+
+/// Self-hosted SearXNG (free, unlimited, aggregates Google/Bing/etc). Needs a URL.
+async fn searxng(client: &reqwest::Client, base: &str, query: &str, n: usize) -> Result<Vec<Hit>> {
+    let base = base.trim_end_matches('/');
+    let url = reqwest::Url::parse_with_params(
+        &format!("{base}/search"),
+        &[("q", query), ("format", "json")],
+    )?;
+    let v: Value = client
+        .get(url)
+        .header("User-Agent", UA)
+        .send()
+        .await
+        .context("SearXNG request failed")?
+        .json()
+        .await
+        .context("SearXNG response was not JSON (enable the JSON format in your instance settings)")?;
     let mut hits = Vec::new();
     if let Some(arr) = v["results"].as_array() {
         for it in arr.iter().take(n) {

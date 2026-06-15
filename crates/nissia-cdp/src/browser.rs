@@ -147,10 +147,12 @@ impl ManagedBrowser {
             format!("--user-data-dir={}", user_data_dir.display()),
             "--no-first-run".to_string(),
             "--no-default-browser-check".to_string(),
+            "--disable-blink-features=AutomationControlled".to_string(),
         ];
 
         if headless {
             args.push("--headless=new".to_string());
+            args.push("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".to_string());
         }
 
         let child = Command::new(&chrome_path)
