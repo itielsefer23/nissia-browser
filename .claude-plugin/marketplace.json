@@ -1,0 +1,14 @@
+{
+  "name": "nissia",
+  "owner": {
+    "name": "itielsefer23",
+    "url": "https://github.com/itielsefer23"
+  },
+  "plugins": [
+    {
+      "name": "nissia-browser",
+      "source": "./",
+      "description": "Token-cheap browser automation for AI agents — search, navigate, and visible agent-browser modes. No MCP server, no API key for everyday use."
+    }
+  ]
+}

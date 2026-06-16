@@ -1,0 +1,12 @@
+{
+  "name": "nissia-browser",
+  "description": "Token-cheap browser automation for AI agents. Drives a real Chromium browser through the `nissia` CLI: search the web, navigate/extract headless, or run a visible agent browser the user can watch — no MCP server and no API key for everyday use.",
+  "author": {
+    "name": "itielsefer23"
+  },
+  "homepage": "https://github.com/itielsefer23/nissia-browser",
+  "repository": "https://github.com/itielsefer23/nissia-browser",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "web", "search", "scraping", "agent"],
+  "skills": "./.claude/skills/"
+}

@@ -71,12 +71,33 @@ Run `nissia --help` to see everything.
 
 ## Updating
 nissia tells you when a newer version is out: `nissia update --check` (cached for 24h, used by
-the skill on startup). Run the installer again to upgrade, then re-copy the skill from this repo.
+the skill on startup). Run the installer again to upgrade the binary. If you installed the
+Claude Code plugin, run `/plugin update nissia-browser` to refresh the skill.
 
-## Use it from Claude Code, Codex or Cursor
-This repo ships a `/nissia-browser` skill (in `.claude/skills/`). When you ask your agent to
-search or browse, it asks which mode (and which browser for Agent mode) and runs nissia for
-you, keeping it cheap.
+## Use it from Claude Code, Codex, Cursor and others
+nissia is a plain CLI, so any agent that can run a shell command can use it once the binary is
+installed. How each tool picks up the guidance differs:
+
+- **Codex, Cursor, Copilot, Windsurf, Zed, Aider and others** read [`AGENTS.md`](AGENTS.md)
+  automatically — just install the `nissia` binary (above) and they know how to drive it.
+  (`SKILL.md` is a Claude-Code-only format; these tools do not read it.)
+- **Claude Code** reads [`CLAUDE.md`](CLAUDE.md) (which imports `AGENTS.md`). For the richer
+  mode-driven workflow it also ships a `/nissia-browser` skill. Install it as a plugin:
+
+  ```text
+  /plugin marketplace add itielsefer23/nissia-browser
+  /plugin install nissia-browser@nissia
+  ```
+
+  Then `/nissia-browser` is available in any project. Alternatively, if you clone this repo and
+  run Claude Code from inside it, the project-level skill in `.claude/skills/` is discovered
+  automatically (no install).
+
+When you ask your agent to search or browse, it asks which mode (and which browser for Agent
+mode) and runs nissia for you, keeping it cheap.
+
+> Note: giving an agent only the GitHub link does **not** install the skill — skills/plugins
+> install through the steps above, not from a pasted URL.
 
 ## Documentation
 - [docs/GUIDE.md](docs/GUIDE.md) — complete guide: the 3 modes, browser selection and default,
