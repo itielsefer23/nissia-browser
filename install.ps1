@@ -50,20 +50,27 @@ Remove-Item -Path $tempDir -Recurse -Force
 Write-Host "==> nissia $version installed to $InstallDir\$BinaryName" -ForegroundColor Green
 Write-Host ""
 
-# Check PATH
-if ($env:PATH -notlike "*$InstallDir*") {
-    Write-Host "  Add nissia to your PATH:" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "    [Environment]::SetEnvironmentVariable('PATH', `"$InstallDir;`$env:PATH`", 'User')"
-    Write-Host ""
-    Write-Host "  Then restart your terminal."
-} else {
-    Write-Host "  Quick start:"
-    Write-Host ""
-    Write-Host "    nissia browser launch --background"
-    Write-Host "    nissia snap https://example.com"
-    Write-Host "    nissia click @e1"
-    Write-Host "    nissia browser stop"
-    Write-Host ""
-    Write-Host "  Full docs: nissia --help"
+# Add to PATH automatically: persist for future terminals AND update the current
+# session, so `nissia` works right away without the user editing anything.
+$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($null -eq $userPath) { $userPath = "" }
+if ($userPath -notlike "*$InstallDir*") {
+    $newUserPath = if ($userPath) { "$InstallDir;$userPath" } else { $InstallDir }
+    [Environment]::SetEnvironmentVariable('PATH', $newUserPath, 'User')
+    Write-Host "==> Added $InstallDir to your PATH (User)." -ForegroundColor Green
 }
+if ($env:PATH -notlike "*$InstallDir*") {
+    $env:PATH = "$InstallDir;$env:PATH"  # current session
+}
+
+Write-Host ""
+Write-Host "  Quick start:"
+Write-Host ""
+Write-Host "    nissia browser launch --background"
+Write-Host "    nissia snap https://example.com"
+Write-Host "    nissia click @e1"
+Write-Host "    nissia browser stop"
+Write-Host ""
+Write-Host "  If a different/already-open terminal can't find 'nissia' yet, restart it"
+Write-Host "  (or use the full path: $InstallDir\$BinaryName)."
+Write-Host "  Full docs: nissia --help"

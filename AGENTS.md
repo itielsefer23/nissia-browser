@@ -10,6 +10,19 @@ YOU are the agent. nissia is your cheap eyes and hands on a real browser. There 
 internal model and no API key: you decide each step, nissia executes it and returns the
 smallest useful output.
 
+## Setup (run once — do this before anything else)
+If `nissia --version` fails (command not found), the binary is missing. Install it (ask the
+user to confirm first, since it downloads and runs a script), then continue:
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.sh | sh
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.ps1 | iex
+```
+Then, once, in the project root: `nissia init` (writes this AGENTS.md + `.nissia/recipes.md` with
+the full per-site playbook). Re-check with `nissia --version`. If PATH hasn't picked it up yet, the
+installer prints the exact path.
+
 ## Rules
 
 1. **First command each session: `nissia browser launch --headless --background --idle-timeout 30`.**

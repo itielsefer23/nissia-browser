@@ -44,19 +44,41 @@ and no API keys for everyday use. Works on **Windows, macOS and Linux**.
 - **Your browser, your choice.** Chrome, Edge, Brave or Opera (`nissia browser detect`).
 
 ## Install
-Prebuilt binary (no Rust needed):
+
+nissia is a small `nissia` **binary** plus **instructions** for your agent. A pasted link installs
+instructions, not a binary, so the binary step always happens once. Pick whichever is easier:
+
+### Easiest: paste this repo's link to your AI agent
+Paste `https://github.com/itielsefer23/nissia-browser` into **Claude Code, Cursor, or Codex** and say
+*"install nissia browser"*. The agent reads this README and does it for you (it will ask before running
+the installer, since that downloads and runs a script). Agents: follow **[For AI agents](#for-ai-agents-installing-this)** below.
+
+### Or do it yourself (2 steps)
+**1. Install the binary** (one line, no Rust needed):
 ```bash
 # macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.sh | sh
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.ps1 | iex
 ```
-Or build from source:
-```bash
-git clone https://github.com/itielsefer23/nissia-browser.git
-cd nissia-browser
-cargo install --path crates/nissia-cli   # installs the `nissia` command
-```
+**2. Wire it to your tool:**
+- **Claude Code:** `/plugin marketplace add itielsefer23/nissia-browser` then `/plugin install nissia-browser@nissia`
+- **Cursor / Codex / opencode / any shell agent:** run `nissia init` in your project (drops `AGENTS.md` + `.nissia/recipes.md`)
+
+That's it. Run `nissia --help` to see everything. (Build from source instead: `git clone` the repo, then
+`cargo install --path crates/nissia-cli`.)
+
+### For AI agents installing this
+A user pasted this repo and asked you to install nissia. Do exactly this:
+1. Run `nissia --version`. If it prints a version, jump to step 4.
+2. The binary is missing. **Ask the user to confirm** (it downloads and runs a script), then run the
+   one-liner for their OS from step 1 above. Re-run `nissia --version`; if PATH hasn't refreshed, use the
+   path the installer printed.
+3. Set it up for the current tool:
+   - **Claude Code:** copy the `skills/nissia-browser/` folder into the user's `~/.claude/skills/`
+     (personal skills are auto-discovered) — or tell the user to run the two `/plugin` commands above.
+   - **Cursor / Codex / opencode / other:** run `nissia init` in the project root.
+4. Verify: `nissia browser detect` lists their browsers and `nissia search "test"` returns results. Done — tell the user.
 
 ## Quick examples
 ```bash
@@ -73,25 +95,12 @@ Run `nissia --help` to see everything.
 nissia tells you when a newer version is out: `nissia update --check` (cached for 24h, used by
 the skill on startup). Run the installer again to upgrade, then re-copy the skill from this repo.
 
-## Use it from Claude Code (plugin)
-nissia browser is a Claude Code **plugin** that adds the `/nissia-browser` skill. Two steps:
-
-1. **Install the `nissia` binary** (see [Install](#install) above) — the skill drives this binary.
-2. **Add the plugin** in Claude Code:
-   ```
-   /plugin marketplace add itielsefer23/nissia-browser
-   /plugin install nissia-browser@nissia
-   ```
-   Then call `/nissia-browser` (or just ask it to search/browse). It asks which mode (and which
-   browser for Agent mode) and runs nissia for you, keeping it cheap. Update later with
-   `/plugin update nissia-browser@nissia`.
-
-> Pasting the repo URL alone does not register the skill — you need the two commands above
-> (that is what makes `/nissia-browser` show up as a slash command).
-
-### Codex, Cursor and other agents
-Run `nissia init` in your project to drop an `AGENTS.md` so any shell-capable agent discovers
-the commands; then it calls `nissia ...` directly.
+## After installing
+- **Claude Code:** call `/nissia-browser` (or just ask it to search/browse). It asks which mode
+  (Search / Navigate / Agent) and, for Agent mode, which browser, then runs nissia for you. Update the
+  plugin with `/plugin update nissia-browser@nissia`.
+- **Cursor / Codex / other:** the agent reads `AGENTS.md` and calls `nissia ...` directly; the full
+  per-site playbook is in `.nissia/recipes.md`. Both are created by `nissia init`.
 
 ## Documentation
 - [docs/GUIDE.md](docs/GUIDE.md) — complete guide: the 3 modes, browser selection and default,

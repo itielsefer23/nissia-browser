@@ -17,11 +17,18 @@ allowed-tools: Bash, AskUserQuestion, Read, Write
 the cheap eyes and hands on a real Chromium browser. CLI, not MCP. No API key for normal use.
 Cross-platform: Windows, macOS, Linux (the binary handles the OS differences).
 
-## 0. Al invocar: verificar binario + chequeo de actualización
-- **¿Está el binario?** Corré `nissia --version`. Si NO existe (command not found), instalaron el
-  plugin pero falta el binario `nissia`: decile al usuario que lo instale (una línea) y NO sigas:
-  - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.sh | sh`
-  - Windows (PowerShell): `irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.ps1 | iex`
+## 0. Al invocar: asegurar el binario + chequeo de actualización
+- **¿Está el binario?** Corré `nissia --version`. Si NO existe (command not found), instalaron el plugin
+  pero falta el binario `nissia` (un link/plugin no instala un binario por sí solo). **AUTOINSTALALO vos**
+  (tenés `Bash`), no le tires comandos al usuario para copiar:
+  1. Pedí permiso UNA vez con `AskUserQuestion` ("Falta el binario `nissia`. ¿Lo instalo? Descarga y
+     ejecuta el instalador oficial del repo."). Es obligatorio porque descarga y ejecuta un script.
+  2. Si acepta, corré el instalador SEGÚN el SO (mirá el environment): 
+     - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.sh | sh`
+     - Windows: `powershell -NoProfile -Command "irm https://raw.githubusercontent.com/itielsefer23/nissia-browser/master/install.ps1 | iex"`
+  3. Reconfirmá con `nissia --version`. Si el PATH no lo toma todavía (terminal ya abierta), usá el binario
+     por ruta completa: Unix `/usr/local/bin/nissia`, Windows `%LOCALAPPDATA%\nissia\bin\nissia.exe`.
+  4. Si el usuario NO acepta, explicá el one-liner y frená (no sigas sin binario).
 - **Actualización (barato, 1 vez):** `nissia update --check` (cacheado 24h). Si imprime
   "update available: X -> Y", avisá en una línea y seguí. Si no imprime nada, no digas nada.
 
