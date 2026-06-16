@@ -1,0 +1,15 @@
+{
+  "name": "nissia",
+  "description": "nissia tools for Claude Code — starting with nissia browser, token-cheap web browsing for AI agents.",
+  "owner": {
+    "name": "itielsefer23",
+    "url": "https://github.com/itielsefer23"
+  },
+  "plugins": [
+    {
+      "name": "nissia-browser",
+      "source": "./",
+      "description": "Token-cheap browser automation for AI agents (the /nissia-browser skill). Needs the `nissia` binary on PATH — see the repo README for the one-line installer."
+    }
+  ]
+}

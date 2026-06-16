@@ -73,10 +73,25 @@ Run `nissia --help` to see everything.
 nissia tells you when a newer version is out: `nissia update --check` (cached for 24h, used by
 the skill on startup). Run the installer again to upgrade, then re-copy the skill from this repo.
 
-## Use it from Claude Code, Codex or Cursor
-This repo ships a `/nissia-browser` skill (in `.claude/skills/`). When you ask your agent to
-search or browse, it asks which mode (and which browser for Agent mode) and runs nissia for
-you, keeping it cheap.
+## Use it from Claude Code (plugin)
+nissia browser is a Claude Code **plugin** that adds the `/nissia-browser` skill. Two steps:
+
+1. **Install the `nissia` binary** (see [Install](#install) above) — the skill drives this binary.
+2. **Add the plugin** in Claude Code:
+   ```
+   /plugin marketplace add itielsefer23/nissia-browser
+   /plugin install nissia-browser@nissia
+   ```
+   Then call `/nissia-browser` (or just ask it to search/browse). It asks which mode (and which
+   browser for Agent mode) and runs nissia for you, keeping it cheap. Update later with
+   `/plugin update nissia-browser@nissia`.
+
+> Pasting the repo URL alone does not register the skill — you need the two commands above
+> (that is what makes `/nissia-browser` show up as a slash command).
+
+### Codex, Cursor and other agents
+Run `nissia init` in your project to drop an `AGENTS.md` so any shell-capable agent discovers
+the commands; then it calls `nissia ...` directly.
 
 ## Documentation
 - [docs/GUIDE.md](docs/GUIDE.md) — complete guide: the 3 modes, browser selection and default,

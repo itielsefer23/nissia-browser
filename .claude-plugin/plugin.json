@@ -1,0 +1,11 @@
+{
+  "name": "nissia-browser",
+  "description": "Token-cheap browser automation for AI agents. Adds the /nissia-browser skill: Search, Navigate and a visible Agent mode that browses like a human (real mouse, typing, scrolling) and closes pop-ups. Requires the `nissia` binary on PATH (see the repo README).",
+  "author": {
+    "name": "itielsefer23",
+    "url": "https://github.com/itielsefer23"
+  },
+  "homepage": "https://github.com/itielsefer23/nissia-browser",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "cli", "ai-agents", "search", "scraping", "token-cheap"]
+}
