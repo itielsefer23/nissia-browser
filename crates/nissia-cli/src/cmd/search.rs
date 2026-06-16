@@ -47,7 +47,11 @@ pub async fn run(
     lang: &str,
     emu: &EmulationOptions,
 ) -> Result<()> {
-    let client = reqwest::Client::new();
+    // Always cap HTTP search: a slow/unresponsive engine must never hang the skill.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let mut hits = if browser {
         ddg_browser(port, query, n, open, lang, emu).await?
     } else {

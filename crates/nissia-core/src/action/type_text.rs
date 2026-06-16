@@ -92,6 +92,35 @@ if(el!==document.activeElement){{el.focus();}}try{{if(el.select)el.select();}}ca
     type_chars(transport, text).await
 }
 
+/// Type into whatever element is currently focused (document.activeElement),
+/// without a selector. Use after a `click`/`clicksel` that opened an overlay /
+/// proxy search input (Booking, Wikipedia, Google Flights...): the overlay input
+/// often has a different element than the bar input, so a selector-based type
+/// misses it, but it IS the focused one. Selects existing text first so we replace.
+pub async fn execute_active(
+    transport: &CdpTransport,
+    text: &str,
+) -> Result<(), nissia_cdp::CdpTransportError> {
+    let r = transport
+        .send(&RuntimeEvaluate {
+            expression: "(function(){var a=document.activeElement;if(!a)return 'none';var ed=a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.isContentEditable;if(!ed)return 'notedit';try{if(a.select)a.select();}catch(e){}return 'ok';})()".to_string(),
+            return_by_value: Some(true),
+            await_promise: Some(true),
+            context_id: None,
+        })
+        .await?;
+    if let Some(Value::String(s)) = r.result.value {
+        if s == "none" || s == "notedit" {
+            return Err(nissia_cdp::CdpTransportError::CommandFailed {
+                method: "typeactive".into(),
+                code: -1,
+                message: "no editable element is focused (click the field first)".into(),
+            });
+        }
+    }
+    type_chars(transport, text).await
+}
+
 /// Human-paced character typing into the currently focused element.
 async fn type_chars(
     transport: &CdpTransport,

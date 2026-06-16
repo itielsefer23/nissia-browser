@@ -53,45 +53,39 @@ pub async fn execute_selector(
 ) -> Result<(), nissia_cdp::CdpTransportError> {
     let sel_json = serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".to_string());
 
-    // Resolve the visible match, scroll it into view, and return its viewport
-    // center. Among multiple matches we pick the first that is actually rendered
-    // (non-zero box and an offsetParent), so hidden responsive duplicates are
-    // skipped.
-    let js = format!(
+    // Resolve the visible match, MARK it with a data attribute, scroll it into
+    // view, and return its viewport center. Among multiple matches we pick the
+    // first that is actually rendered (non-zero box and hittable), so hidden
+    // responsive duplicates are skipped. Marking lets us re-measure the *same*
+    // element later by selector, which is how we survive layout shift on
+    // lazy-loading SPAs (the box moves as images stream in below the fold).
+    let js_resolve = format!(
         "(function(){{\
+try{{document.querySelectorAll('[data-nzc]').forEach(function(e){{e.removeAttribute('data-nzc');}});}}catch(_){{}}\
 var els=Array.from(document.querySelectorAll({sel_json}));\
 if(!els.length)return 'notfound';\
 var vw=window.innerWidth,vh=window.innerHeight;\
 function center(e){{var b=e.getBoundingClientRect();return {{e:e,b:b,cx:b.left+b.width/2,cy:b.top+b.height/2}};}}\
-function hittable(o){{if(o.b.width===0&&o.b.height===0)return false;if(o.cx<0||o.cx>vw||o.cy<0||o.cy>vh)return false;var t=document.elementFromPoint(o.cx,o.cy);return !!t&&(t===o.e||o.e.contains(t)||t.contains(o.e));}}\
+function hittable(o){{if(o.b.width===0&&o.b.height===0)return false;if(o.cx<0||o.cx>vw||o.cy<0||o.cy>vh)return false;var t=document.elementFromPoint(o.cx,o.cy);return !!t&&(t===o.e||o.e.contains(t));}}\
 var cand=els.map(center);\
 var chosen=cand.find(hittable);\
-if(!chosen){{var first=els[0];first.scrollIntoView({{block:'center',inline:'center'}});chosen=center(first);if(!hittable(chosen)&&chosen.b.width===0&&chosen.b.height===0)return 'hidden';}}\
+if(!chosen){{var first=els.find(function(e){{return e.offsetParent!==null;}})||els[0];first.scrollIntoView({{block:'center',inline:'center'}});chosen=center(first);}}\
+if(chosen.b.width===0&&chosen.b.height===0)return 'hidden';\
+try{{chosen.e.setAttribute('data-nzc','1');}}catch(_){{}}\
 return JSON.stringify([chosen.cx,chosen.cy]);\
 }})()"
     );
 
-    // First call scrolls + measures; do it, then re-measure after a short settle
-    // so the coordinates reflect the post-scroll position.
-    let _ = transport
-        .send(&RuntimeEvaluate {
-            expression: js.clone(),
-            return_by_value: Some(true),
-            await_promise: Some(true),
-            context_id: None,
-        })
-        .await?;
-    tokio::time::sleep(std::time::Duration::from_millis(220)).await;
     let r = transport
         .send(&RuntimeEvaluate {
-            expression: js,
+            expression: js_resolve,
             return_by_value: Some(true),
             await_promise: Some(true),
             context_id: None,
         })
         .await?;
 
-    let (cx, cy) = match r.result.value {
+    match r.result.value {
         Some(Value::String(ref s)) if s == "notfound" => {
             return Err(nissia_cdp::CdpTransportError::CommandFailed {
                 method: "click".into(),
@@ -106,18 +100,7 @@ return JSON.stringify([chosen.cx,chosen.cy]);\
                 message: format!("Element for selector {selector} is not visible"),
             });
         }
-        Some(Value::String(ref xystr)) => {
-            let xy: Vec<f64> = serde_json::from_str(xystr).unwrap_or_default();
-            if xy.len() == 2 {
-                (xy[0], xy[1])
-            } else {
-                return Err(nissia_cdp::CdpTransportError::CommandFailed {
-                    method: "click".into(),
-                    code: -1,
-                    message: format!("Element for selector {selector} has no usable box"),
-                });
-            }
-        }
+        Some(Value::String(_)) => {}
         _ => {
             return Err(nissia_cdp::CdpTransportError::CommandFailed {
                 method: "click".into(),
@@ -125,13 +108,117 @@ return JSON.stringify([chosen.cx,chosen.cy]);\
                 message: format!("Could not locate selector: {selector}"),
             });
         }
-    };
+    }
+
+    // Wait for the marked element's position to STABILIZE. News/e-commerce SPAs
+    // stream content in after a scroll, shifting the target's box (sometimes by
+    // thousands of px when scrolling up a long virtualized feed). A fixed delay
+    // can't win that race, so we poll until the box stops moving, re-scrolling it
+    // into view on each tick if it drifts off-screen.
+    let (mut cx, mut cy) = settle_marked(transport).await.ok_or_else(|| {
+        nissia_cdp::CdpTransportError::CommandFailed {
+            method: "click".into(),
+            code: -1,
+            message: format!("Element for selector {selector} vanished before click"),
+        }
+    })?;
+
+    // Move the human cursor toward the target, then VERIFY it is still under the
+    // pointer (layout may have shifted during the ~200ms trajectory). If it
+    // moved, re-measure once and glide to the corrected spot before clicking.
+    human_move(transport, cx, cy).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(110)).await;
+    if let Some((ok, nx, ny)) = verify_marked(transport).await {
+        if !ok && (nx - cx).abs() + (ny - cy).abs() > 4.0 {
+            cx = nx;
+            cy = ny;
+            human_move(transport, cx, cy).await?;
+        }
+    }
 
     if std::env::var("NISSIA_DEBUG_CLICK").is_ok() {
         eprintln!("[debug] selector visible center = ({cx:.1}, {cy:.1})");
     }
     human_click_at(transport, cx, cy).await?;
+
+    // Best-effort cleanup of the marker so it never leaks into the page.
+    let _ = transport
+        .send(&RuntimeEvaluate {
+            expression: "(function(){try{var e=document.querySelector('[data-nzc]');if(e)e.removeAttribute('data-nzc');}catch(_){}return 1;})()".to_string(),
+            return_by_value: Some(true),
+            await_promise: Some(false),
+            context_id: None,
+        })
+        .await;
     Ok(())
+}
+
+/// Poll the marked element (`[data-nzc]`) until its viewport position stops
+/// moving (lazy content settled), re-scrolling it into view on each tick if it
+/// has drifted off-screen. Returns the stabilized viewport center. Caps at
+/// ~1.6s so a perpetually-animating page still proceeds with its last reading.
+async fn settle_marked(transport: &CdpTransport) -> Option<(f64, f64)> {
+    let js = "(function(){var e=document.querySelector('[data-nzc]');if(!e)return 'gone';\
+var b=e.getBoundingClientRect();var cx=b.left+b.width/2,cy=b.top+b.height/2;\
+if(cy<0||cy>window.innerHeight||cx<0||cx>window.innerWidth){e.scrollIntoView({block:'center',inline:'center'});b=e.getBoundingClientRect();cx=b.left+b.width/2;cy=b.top+b.height/2;}\
+return JSON.stringify([cx,cy]);})()";
+    let mut last = f64::NAN;
+    let mut out: Option<(f64, f64)> = None;
+    for i in 0..10 {
+        let r = transport
+            .send(&RuntimeEvaluate {
+                expression: js.to_string(),
+                return_by_value: Some(true),
+                await_promise: Some(false),
+                context_id: None,
+            })
+            .await
+            .ok()?;
+        let (cx, cy) = match r.result.value {
+            Some(Value::String(ref s)) if s != "gone" => {
+                let v: Vec<f64> = serde_json::from_str(s).ok()?;
+                if v.len() == 2 {
+                    (v[0], v[1])
+                } else {
+                    return out;
+                }
+            }
+            _ => return out,
+        };
+        out = Some((cx, cy));
+        if i > 0 && (cy - last).abs() < 2.0 {
+            return out;
+        }
+        last = cy;
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    out
+}
+
+/// After the cursor has moved, check whether the marked element is still under
+/// its own center point (it may have shifted during the trajectory). Returns
+/// `(still_hittable, fresh_cx, fresh_cy)`.
+async fn verify_marked(transport: &CdpTransport) -> Option<(bool, f64, f64)> {
+    let r = transport
+        .send(&RuntimeEvaluate {
+            expression: "(function(){var e=document.querySelector('[data-nzc]');if(!e)return 'gone';var b=e.getBoundingClientRect();var cx=b.left+b.width/2,cy=b.top+b.height/2;var t=document.elementFromPoint(cx,cy);var ok=!!t&&(t===e||e.contains(t));return JSON.stringify([ok?1:0,cx,cy]);})()".to_string(),
+            return_by_value: Some(true),
+            await_promise: Some(false),
+            context_id: None,
+        })
+        .await
+        .ok()?;
+    match r.result.value {
+        Some(Value::String(ref s)) if s != "gone" => {
+            let v: Vec<f64> = serde_json::from_str(s).ok()?;
+            if v.len() == 3 {
+                Some((v[0] != 0.0, v[1], v[2]))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Dispatch a trusted left click at viewport coordinates, preceded by a HUMAN

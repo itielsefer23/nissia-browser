@@ -35,6 +35,11 @@ struct Cli {
     #[arg(long, global = true)]
     locale: Option<String>,
 
+    /// Override the page timezone (IANA id, e.g. "America/Sao_Paulo"). Set it to
+    /// match --geo: a geo/timezone mismatch is a signal anti-bot systems flag.
+    #[arg(long, global = true)]
+    timezone: Option<String>,
+
     /// Override User-Agent string
     #[arg(long, global = true)]
     user_agent: Option<String>,
@@ -341,6 +346,12 @@ enum BrowserAction {
         #[arg(long)]
         browser: Option<String>,
 
+        /// Use a specific user-data-dir (a real / warmed profile with cookies and
+        /// history). Strongest anti-bot trust signal. The browser must be CLOSED for
+        /// that profile. Also settable via NISSIA_USER_DATA_DIR.
+        #[arg(long)]
+        profile_path: Option<String>,
+
         /// Auto-stop the browser after N minutes of inactivity (no nissia commands).
         /// Recommended for AI agent sessions to prevent orphaned processes.
         #[arg(long)]
@@ -485,11 +496,45 @@ fn parse_geo(s: &str) -> Option<(f64, f64)> {
 }
 
 async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
-    let emu = nissia_core::snap::EmulationOptions {
+    let mut cli = cli;
+    // Raw env exactly as given on THIS invocation (before inheriting a session).
+    let launch_lang = cli.lang.clone();
+    let mut emu = nissia_core::snap::EmulationOptions {
         geo: cli.geo.as_deref().and_then(parse_geo),
         locale: cli.locale.clone(),
         user_agent: cli.user_agent.clone(),
+        timezone: cli.timezone.clone(),
     };
+    // A `launch` defines the session fingerprint → persist its raw flags (this
+    // also clears any stale prior session). Every OTHER command inherits that
+    // fingerprint for fields it did not set itself, so the whole session stays
+    // internally consistent (geo/timezone/locale/lang all agree) without the
+    // caller having to repeat the flags — consistency is what anti-bot checks.
+    let is_launch = matches!(
+        cli.command,
+        Commands::Browser {
+            action: BrowserAction::Launch { .. }
+        }
+    );
+    if is_launch {
+        nissia_core::snap::save_session_emu(&launch_lang, &emu);
+    } else if let Some((sl, se)) = nissia_core::snap::load_session_emu() {
+        if emu.geo.is_none() {
+            emu.geo = se.geo;
+        }
+        if emu.locale.is_none() {
+            emu.locale = se.locale;
+        }
+        if emu.timezone.is_none() {
+            emu.timezone = se.timezone;
+        }
+        if emu.user_agent.is_none() {
+            emu.user_agent = se.user_agent;
+        }
+        if cli.lang == "en-US" {
+            cli.lang = sl;
+        }
+    }
 
     match cli.command {
         Commands::Snap { url, focus } => {
@@ -684,6 +729,7 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                 background,
                 profile,
                 browser,
+                profile_path,
                 idle_timeout,
             } => {
                 cmd::browser::run_launch(
@@ -692,6 +738,7 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                     background,
                     profile.as_deref(),
                     browser.as_deref(),
+                    profile_path.as_deref(),
                     idle_timeout,
                     fmt,
                 )?;
@@ -762,6 +809,16 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                 let agent_md = include_str!("../../../AGENTS.md");
                 std::fs::write(agent_path, agent_md)?;
                 created.push("AGENTS.md");
+            }
+
+            // Ship the deep recipes (anti-bot, human navigation, choosing the best,
+            // per-site playbooks) so ANY agent — Codex, Cursor, opencode, not just
+            // Claude Code — gets the same depth, not only the short AGENTS.md.
+            let recipes_path = nissia_dir.join("recipes.md");
+            if !recipes_path.exists() {
+                let recipes_md = include_str!("../../../skills/nissia-browser/recipes.md");
+                std::fs::write(&recipes_path, recipes_md)?;
+                created.push(".nissia/recipes.md");
             }
 
             // Create .nissia/.gitkeep so empty dir is tracked by git

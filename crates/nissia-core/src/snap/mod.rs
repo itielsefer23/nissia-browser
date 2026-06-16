@@ -13,6 +13,67 @@ pub struct EmulationOptions {
     pub geo: Option<(f64, f64)>,
     pub locale: Option<String>,
     pub user_agent: Option<String>,
+    /// IANA timezone id (e.g. "America/Sao_Paulo"). Kept consistent with `geo`.
+    pub timezone: Option<String>,
+}
+
+fn session_emu_file() -> std::path::PathBuf {
+    crate::data_dir().join("session_emu.json")
+}
+
+/// Persist the launch-time language + emulation so later commands reuse the same
+/// fingerprint (geo/locale/timezone/lang/UA) without the caller repeating the
+/// flags. Cross-command CONSISTENCY is the #1 thing anti-bot systems check, so a
+/// session must look the same on every request, not just on the first `goto`.
+pub fn save_session_emu(lang: &str, emu: &EmulationOptions) {
+    let v = serde_json::json!({
+        "lang": lang,
+        "geo": emu.geo.map(|(a,b)| vec![a,b]),
+        "locale": emu.locale,
+        "user_agent": emu.user_agent,
+        "timezone": emu.timezone,
+    });
+    let _ = std::fs::write(session_emu_file(), v.to_string());
+}
+
+/// Load the persisted session emulation (lang, options) written at launch, if any.
+pub fn load_session_emu() -> Option<(String, EmulationOptions)> {
+    let txt = std::fs::read_to_string(session_emu_file()).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&txt).ok()?;
+    let lang = v["lang"].as_str().unwrap_or("en-US").to_string();
+    let geo = v["geo"].as_array().and_then(|a| {
+        if a.len() == 2 {
+            Some((a[0].as_f64()?, a[1].as_f64()?))
+        } else {
+            None
+        }
+    });
+    let emu = EmulationOptions {
+        geo,
+        locale: v["locale"].as_str().map(|s| s.to_string()),
+        user_agent: v["user_agent"].as_str().map(|s| s.to_string()),
+        timezone: v["timezone"].as_str().map(|s| s.to_string()),
+    };
+    Some((lang, emu))
+}
+
+/// Build a clean `navigator.languages` list from a single language tag, with no
+/// HTTP q-values (those belong only in the Accept-Language *header*). A real
+/// browser's `navigator.languages` looks like `["pt-BR","pt","en"]`, never
+/// `["pt-BR","en;q=0.9"]`. e.g. "pt-BR" → "pt-BR,pt,en"; "en-US" → "en-US,en".
+fn clean_language_list(lang: &str) -> String {
+    let base = lang.split('-').next().unwrap_or(lang);
+    if lang == base {
+        if lang.starts_with("en") {
+            lang.to_string()
+        } else {
+            format!("{lang},en")
+        }
+    } else if base == "en" {
+        format!("{lang},{base}")
+    } else {
+        format!("{lang},{base},en")
+    }
 }
 
 /// Apply browser environment overrides (Accept-Language, geolocation, locale, user-agent).
@@ -44,7 +105,7 @@ pub async fn apply_emulation(
             .await?;
     }
 
-    // Locale override (JS navigator.language)
+    // Locale override (affects Intl: number/date formatting, currency).
     if let Some(ref loc) = opts.locale {
         use nissia_cdp::commands::EmulationSetLocaleOverride;
         transport
@@ -54,16 +115,51 @@ pub async fn apply_emulation(
             .await?;
     }
 
-    // User-Agent override
-    if let Some(ref ua) = opts.user_agent {
-        use nissia_cdp::commands::EmulationSetUserAgentOverride;
-        transport
-            .send(&EmulationSetUserAgentOverride {
-                user_agent: ua.clone(),
-                accept_language: Some(format!("{lang},en;q=0.9")),
-                platform: None,
+    // Timezone override — keep it consistent with the overridden geolocation.
+    // A geo in Rio but a timezone in New York is a classic anti-bot mismatch.
+    if let Some(ref tz) = opts.timezone {
+        use nissia_cdp::commands::EmulationSetTimezoneOverride;
+        let _ = transport
+            .send(&EmulationSetTimezoneOverride {
+                timezone_id: tz.clone(),
             })
-            .await?;
+            .await;
+    }
+
+    // User-Agent + Accept-Language. The `acceptLanguage` field of
+    // setUserAgentOverride is what actually drives `navigator.language` /
+    // `navigator.languages` (setLocaleOverride only touches Intl). We send it
+    // ALWAYS so the JS language matches Accept-Language and the locale — even
+    // when the caller did not pass a custom UA, in which case we reuse the
+    // browser's REAL user-agent (no UA faking, just language consistency).
+    {
+        use nissia_cdp::commands::{EmulationSetUserAgentOverride, RuntimeEvaluate};
+        let ua = match opts.user_agent {
+            Some(ref ua) => ua.clone(),
+            None => transport
+                .send(&RuntimeEvaluate {
+                    expression: "navigator.userAgent".to_string(),
+                    return_by_value: Some(true),
+                    await_promise: Some(false),
+                    context_id: None,
+                })
+                .await
+                .ok()
+                .and_then(|r| r.result.value)
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default(),
+        };
+        if !ua.is_empty() {
+            transport
+                .send(&EmulationSetUserAgentOverride {
+                    user_agent: ua,
+                    // CLEAN list (no q-values): this becomes navigator.languages,
+                    // and a real browser never has ";q=0.9" inside that array.
+                    accept_language: Some(clean_language_list(lang)),
+                    platform: None,
+                })
+                .await?;
+        }
     }
 
     Ok(())

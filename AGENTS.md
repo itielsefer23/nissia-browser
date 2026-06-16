@@ -84,6 +84,35 @@ eval document.title
 ' | nissia batch
 ```
 
-Verbs: goto / snap / read / eval / click / clicksel / key / fill / type / typesel /
-select / scroll [up|down|read] / dismiss / reload / back / forward / wait / waitfor / waitgone.
-Prefer adaptive `waitfor <css>` over fixed `wait <ms>`. Reuse the warm browser. See docs/SPEED.md.
+Verbs: goto / snap / read / eval / click / clicksel / key / fill / type / typesel `<css> => <txt>` /
+typeactive / select / scroll [up|down|read] / dismiss / reload / back / forward / wait / waitfor / waitgone.
+`typeactive <txt>` types into the focused element (overlay/proxy search boxes). Prefer adaptive
+`waitfor <css>` over fixed `wait <ms>`. Reuse the warm browser. See docs/SPEED.md.
+
+## Operating real sites (validated 2026-06)
+- **Submit a search by CLICKING the button, not Enter** (Enter fails on DuckDuckGo/MercadoLibre/Wikipedia;
+  it works on Google). Note: a `<button>` reports `type==="submit"` even with no attribute, so the CSS
+  `[type=submit]` may match nothing — click it by its component class instead.
+- **Click reliability**: `clicksel` scrolls the target in, waits for the layout to stop moving (lazy SPAs
+  shift it), and verifies the cursor is on target before clicking. To just FOLLOW a content link, reading the
+  `href` and `goto`-ing it is the cheapest, 100%-reliable path; reserve real clicks for search/widgets.
+- **Deduplicate when extracting lists** — sites render each item 2-3× (responsive duplicates); key by title/href.
+- **Verify after every navigation** (URL + title), then handle blocks (next section).
+
+## Stealth & anti-bot
+nissia's base stealth is real: it never calls `Runtime.enable` (the #1 CDP tell), uses real Chrome (genuine
+TLS/JA4 + canvas/WebGL), and `navigator.webdriver` stays false. The lever you control is **consistency**:
+geo + timezone + language + UA must agree. Set them once on `launch` and every later command inherits them:
+`nissia browser launch --headless --background --lang pt-BR --locale pt-BR --geo=-22.9,-43.1 --timezone America/Sao_Paulo`.
+- **Strong walls (DataDome/Akamai: MercadoLibre, Booking, Amazon, Magalu):** the homepage traps bots; the
+  **results URL with query params usually loads** (ML `lista.mercadolivre.com.br/<query>`, Booking
+  `searchresults.html?ss=...&checkin=...`). It is NOT 100%: after repeated hits ML escalates to
+  `/gz/account-verification` and blocks the whole session. A warmed profile (`--profile-path <dir>`) helps.
+- **Detect a block** by URL (`glossary`, `account-verification`, `captcha`, `challenge`, `__cf_chl`) or title
+  (`Access Denied`, `Just a moment`, "Algo deu errado" = usually transient → `reload` once). If truly blocked,
+  stop and tell the user; offer the official source/API. Do not loop. Full playbook in `.nissia/recipes.md`.
+
+## Choosing the best option (for the user)
+Don't grab the first or cheapest. Rank by value: rating (≥4★/≥8.0) × number of reviews + reasonable price;
+filter non-negotiables first; present the top 3 + one recommendation with a short why. Ask ONE question only
+if the deciding criterion is genuinely ambiguous. Details and per-site recipes in `.nissia/recipes.md`.

@@ -61,6 +61,7 @@ pub fn run_launch(
     background: bool,
     profile: Option<&str>,
     browser: Option<&str>,
+    profile_path: Option<&str>,
     idle_timeout: Option<u32>,
     fmt: &str,
 ) -> Result<()> {
@@ -81,9 +82,14 @@ pub fn run_launch(
         std::fs::remove_file(pid_file(port)).ok();
     }
 
-    // Persistent profile directory — keeps cookies/state between sessions
+    // Profile (user-data-dir). Priority: --profile-path > NISSIA_USER_DATA_DIR > the
+    // persistent named profile under our data dir. A real / warmed profile (with cookies
+    // and history) is the strongest anti-bot trust signal.
     let profile_name = profile.unwrap_or("default");
-    let profile_dir = nissia_core::data_dir().join("profiles").join(profile_name);
+    let profile_dir = profile_path
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var("NISSIA_USER_DATA_DIR").ok().map(std::path::PathBuf::from))
+        .unwrap_or_else(|| nissia_core::data_dir().join("profiles").join(profile_name));
     // Explicit --browser wins; otherwise fall back to the saved default browser.
     let saved_default = load_default();
     let chosen = browser.or(saved_default.as_deref());

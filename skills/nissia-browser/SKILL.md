@@ -66,6 +66,10 @@ nissia browser focus                                  # traela al frente (el usu
 
 - `--browser` acepta `chrome|edge|brave|opera|chromium`. `launch` sin `--browser` usa el
   default guardado, y si no hay, autodetecta.
+- **Perfil con tu sesión iniciada:** por defecto usa un perfil dedicado persistente (se "calienta"
+  con el uso: logueate una vez y queda). Para abrir directamente con tu perfil real logueado,
+  `nissia browser launch --profile-path "<carpeta del perfil>"` (ese navegador debe estar CERRADO).
+  Es además la mejor defensa anti-bot (sesión establecida con cookies).
 - **`nissia browser focus`** trae la ventana al frente (CDP `Page.bringToFront`). Llamalo
   después de lanzar y otra vez antes de mostrar resultados, así el usuario VE lo que pasa
   (si no, la ventana puede quedar detrás de la terminal y "no se ve la búsqueda").
@@ -94,14 +98,28 @@ wait <ms>                  waitfor <css>     waitgone <css>
 
 ## 4. Operar sitios como humano (interpretar al usuario) — lecciones aprendidas
 
+> Patrones por TIPO de sitio (e-commerce, hoteles, noticia, login/paywall, scroll infinito,
+> locale) + el **extractor genérico de resultados sin depender de clases** están en
+> **`recipes.md`** (en esta misma carpeta). Leelo SOLO cuando vayas a operar ese tipo de sitio
+> (no se carga solo = no gasta tokens). Principio: hacé el trabajo en el binario/V8 y devolvé lo mínimo.
+
+**CHECKLIST AGENTE (obligatorio, NO lo saltes — el dueño lo marcó):**
+1. **Verificá la URL** después de CADA navegación (los sitios redirigen).
+2. **`scroll read` ANTES de extraer** (recorré la página leyendo/escaneando; no respondas como si hubieras leído sin scrollear).
+3. **Elegí el MEJOR resultado, NO el primero** (comparás y decidís; ver "Elegir la MEJOR opción" en recipes.md).
+4. **Descubrí, no adivines** selectores (snap o finder de recipes.md); enviá búsquedas por BOTÓN (no Enter).
+5. Tenés `back` / `forward` / `reload` para moverte como humano. Usalos en vez de re-buscar de cero.
+
 Deducí el objetivo (explícito o implícito) y operá el sitio como una persona. Reglas que
 SÍ funcionan (aprendidas operando formularios reales tipo Google Flights):
 
 1. **Tipear en un campo = primero CLICK real, después escribir.** Muchos campos (orígenes,
    destinos, buscadores) abren un *overlay con otro input* al clickearlos. Por eso:
    `clicksel <input>` (abre/enfoca) → `typesel <input> => <texto>` (escribe en el que quedó activo).
-   `typesel` ya elige el elemento **visible** (hit-test con `elementFromPoint`) y prefiere el
-   que tiene foco, así no escribe en duplicados ocultos.
+   `typesel` elige el elemento **visible** (hit-test) y prefiere el enfocado.
+   **Si el input "not visible" (colapsado):** clickeá el ícono/lupa para ABRIRLO, después `typeactive <texto>`.
+   **No adivines selectores de links/títulos: DESCUBRÍ** (con `snap --focus` o el finder de `recipes.md`).
+   Y **verificá la URL después de navegar** (los sitios redirigen: BBC→x.com, ML→glossary).
 2. **Escribí el valor DIRECTO y limpio.** Poné `São Paulo`, no tokens raros. En `batch`, el
    separador entre selector y texto es ` => ` (el selector puede tener espacios).
 3. **Autocompletar (ciudades/aeropuertos):** escribí → `waitfor [role=option]` (o `wait 1000`)
@@ -112,8 +130,14 @@ SÍ funcionan (aprendidas operando formularios reales tipo Google Flights):
    el calendario móvil duplicado y oculto vía hit-test). Verificá: la celda elegida cambia su
    `aria-label` (ej. agrega "fecha de salida"/"fecha de regreso").
 5. **Listas/desplegables nativos:** `select @eN "valor"`.
-6. **Enviar:** click en el botón Buscar (`clicksel`), o `key enter`. Si un panel tapa el botón,
-   cerralo primero (Listo/Hecho/Escape).
+6. **Enviar la búsqueda: por defecto CLICKEÁ EL BOTÓN (lupa), no confíes en `key enter`.** En
+   DuckDuckGo, MercadoLibre y Wikipedia el texto se tipea bien pero `key enter` NO dispara el
+   submit (te quedás en la home). **En Google SÍ anda `key Enter`** (validado 2026-06-16). Botón:
+   `clicksel 'button[type=submit], .nav-search-btn, button[aria-label*="buscar" i], button[aria-label*="search" i]'`.
+   OJO: `[type=submit]` en CSS no matchea `<button>` sin el atributo literal (Wikipedia) → clickealo por su
+   clase de componente (`.cdx-search-input__end-button`) o filtrá `form button` por `el.type==='submit'` en JS.
+   Si hay autocomplete y querés una sugerencia, `key arrowdown` + `key enter`.
+   Tras enviar, los resultados cargan async: `waitfor` un selector de RESULTADO (h1/contenedor/precio), no `a[href]`.
 7. **Abrir un resultado: ELEGÍ el mejor, NO siempre el #1.** Primero listá
    (`search --browser --n 6`), LEÉ los títulos/URLs/snippets y elegí el que mejor responde la
    intención: preferí el sitio **oficial/confiable** y el contenido que de verdad coincide;
@@ -125,6 +149,14 @@ SÍ funcionan (aprendidas operando formularios reales tipo Google Flights):
    `search --browser --open <M>` (reusa, NO re-tipea). NO arranques la búsqueda de cero cada vez.
    Flujo: `search --open A` → leer → `back` → `search --open B` → leer → `back` → …
 8. **Leer resultados:** `waitfor <contenedor>` → `dismiss` → `read --focus <contenedor>` o `eval`.
+9. **Verificá la navegación (anti-bot):** después de ir a un sitio o enviar una búsqueda, chequeá que
+   la URL/título sean lo esperado. Si te redirigió a algo raro (señuelo/consent/verificación), `reload`
+   una vez; si el sitio bloquea el flujo (ML→glossary, Booking no enfoca el campo) → **deep-linkeá la URL
+   de resultados** (ver `recipes.md`); si ni eso, avisá al usuario y ofrecé otra fuente.
+   Campos overlay que no toman texto: clic + `typeactive <texto>` (tipea en el enfocado).
+10. **Elegir la MEJOR opción para el usuario:** no agarres la 1ª ni la más barata. Rankeá por
+    "mejor valor" (rating ≥4★ + muchas reseñas + precio razonable), mostrá **top 3 + recomendación con el
+    porqué**. Si el criterio decisivo es ambiguo, UNA pregunta corta; si no, decidí y explicá. Detalle en `recipes.md`.
 
 ### Ejemplo real: vuelos ida y vuelta en UN batch (rápido y humano)
 ```
@@ -154,7 +186,23 @@ A veces una página da error, carga a medias o queda en blanco. Como un humano: 
 (o `reload hard` sin caché) y reintentá una vez antes de rendirte. En `batch` es el verbo `reload`.
 
 ## 6. Sigilo (anti-bot) — integrado, y CÓMO NO parecer robot
-- Navegador real + perfil persistente + `navigator.webdriver = false`.
+- Navegador real + perfil persistente + `navigator.webdriver = false`. nissia **no llama
+  `Runtime.enable`** (el tell #1 de CDP, lo que miran DataDome/Cloudflare vía `consoleAPICalled`;
+  confirmado en código 2026-06-16) y usa Chrome real (TLS/JA4 + canvas/WebGL genuinos) → buen sigilo de base.
+- **CONSISTENCIA = lo #1 que chequean (capas combinadas).** geo + timezone + idioma + UA tienen que
+  COINCIDIR (un geo en Rio con timezone de New York = bandera roja). nissia ahora setea
+  `Emulation.setTimezoneOverride` y arregla `navigator.language`/`languages` (lista limpia, sin `;q=`).
+  **Lo que pongas en `browser launch` (`--geo --timezone --locale --lang`) se PERSISTE y lo heredan
+  TODOS los comandos siguientes** (no hace falta repetir flags) → la sesión entera se ve igual. Para un
+  sitio brasilero: `--lang pt-BR --locale pt-BR --geo=-22.9,-43.1 --timezone America/Sao_Paulo`.
+- **Muros fuertes (DataDome/Akamai: Booking, MercadoLibre, Amazon, Magalu):** el parcheo JS NO sirve. La home
+  trampea el flujo (ML→`/glossary/X/1`; Booking no enfoca el campo). **EL TRUCO: deep-linkeá la URL de
+  resultados con query params** (ML `lista.mercadolivre.com.br/<consulta>`, Booking `searchresults.html?ss=...`).
+  **PERO no es 100%: ML ESCALA a `/gz/account-verification` (bloqueo de TODA la sesión) tras varios hits
+  automatizados** (validado 2026-06-16); ahí ni reload ni otra query lo salvan. En frío suele andar (1 búsqueda).
+  Ayuda: **perfil calentado** (`--profile-path <dir>` con cookies/sesión, navegador cerrado), pacing lento, menos hits.
+  Detectá el bloqueo por la URL/título (ver `recipes.md` "Firmas de bloqueo"); si bloqueó, avisá al usuario y
+  ofrecé fuente/API oficial. No insistas en loop. Errores transitorios (Amazon "Algo deu errado") → `reload` 1 vez.
 - **Trayectoria de mouse humana**: cada click (`click`, `clicksel`, `search --open`) mueve el
   puntero por una **curva Bézier con velocidad variable (acelera y desacelera, tipo Fitts) +
   micro-ajuste final**, no teletransporta. Es lo que miran los anti-bots (curvatura, velocidad,

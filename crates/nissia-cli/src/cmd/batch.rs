@@ -14,6 +14,7 @@
 //!   fill @eN <value...>
 //!   type @eN <text...>
 //!   typesel <css> => <text>  human-type into a CSS selector (no @eN snap needed).
+//!   typeactive <text>     human-type into the focused element (overlay/proxy search inputs)
 //!                            Use " => " to separate (the selector may contain spaces).
 //!   select @eN <value...>
 //!   scroll [up|down]
@@ -163,6 +164,10 @@ async fn exec_line(
                 None => split2(rest),
             };
             nissia_core::action::type_text::execute_selector(transport, sel, v).await?;
+            Ok("ok".to_string())
+        }
+        "typeactive" => {
+            nissia_core::action::type_text::execute_active(transport, rest).await?;
             Ok("ok".to_string())
         }
         "select" => {

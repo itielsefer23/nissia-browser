@@ -827,3 +827,19 @@ impl CdpCommand for EmulationSetUserAgentOverride {
         "Emulation.setUserAgentOverride"
     }
 }
+
+/// Override the page timezone (IANA id, e.g. "America/Sao_Paulo"). Keeps the
+/// timezone consistent with an overridden geolocation — a geo/timezone mismatch
+/// is a signal anti-bot systems flag.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmulationSetTimezoneOverride {
+    pub timezone_id: String,
+}
+
+impl CdpCommand for EmulationSetTimezoneOverride {
+    type Response = serde_json::Value;
+    fn method_name(&self) -> &'static str {
+        "Emulation.setTimezoneOverride"
+    }
+}
