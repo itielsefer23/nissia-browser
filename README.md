@@ -20,6 +20,27 @@ web browser while spending very few tokens. It is a small command-line tool: you
 simple commands and only the useful result comes back. No MCP server, no heavy screenshots,
 and no API keys for everyday use. Works on **Windows, macOS and Linux**.
 
+## What's new in v0.3.4
+Agent-mode browsing is now genuinely human, can sign in once and stay warm, can finish a
+purchase safely, and is harder to detect. All of it runs **inside the binary** (0 extra tokens)
+and is **adaptive** (full realism where it matters, fast everywhere else).
+- 🧑 **Human browsing** (`--pace fast|human|protected`): curved mouse with jitter and overshoot,
+  scroll with inertia, lognormal typing with the occasional typo, and a pause after a page loads.
+- 🔎 **Operates like a person**: uses the site's own search box, applies filters one by one and
+  sorts, scrolls the listing for real, opens a few product pages and compares.
+- 📊 **Honest reporting**: counts only what actually entered the viewport ("scanned N of M"),
+  never claims to have read the whole page.
+- 🔐 **Warm logged-in profile** (`nissia browser login`): sign in to your accounts once; the
+  session persists and is reused (also the strongest anti-bot signal).
+- 🛒 **Safe buying**: stops at the order summary and waits for your explicit OK before paying,
+  and **refuses to type card / CVV fields**.
+- 🥷 **Stealth 2026**: consistent geo / timezone / language / user-agent across the session;
+  verified 0 flags on bot.sannysoft; never calls `Runtime.enable`.
+- 🩹 **Fixes**: `read --focus` now picks the richest matching block (no more grabbing an
+  embedded card), reliable clicks on lazy SPAs, and `install.ps1` adds nissia to your PATH.
+
+See the [full changelog](CHANGELOG.md) or the [v0.3.4 release](https://github.com/itielsefer23/nissia-browser/releases/tag/v0.3.4).
+
 ## Why it is cheap and fast
 - It returns just the text or data you ask for, never whole pages or images.
 - Whole flows run in one `nissia batch` (one connection, one round-trip) with adaptive waits.
@@ -41,6 +62,10 @@ and no API keys for everyday use. Works on **Windows, macOS and Linux**.
   `navigator.webdriver` false **without** the flag that shows Chrome's "you are automated"
   banner — so sites do not treat it as a bot.
 - **Recovers like a human.** If a page errors or half-loads, it can `reload` and retry.
+- **Signs in once, stays warm.** `nissia browser login` opens a dedicated profile so it uses
+  your logged-in accounts (and passes anti-bots better).
+- **Buys safely.** With payment already saved and your go-ahead, it reaches the order summary,
+  stops, and only pays after you confirm — and it never types card numbers or CVV.
 - **Your browser, your choice.** Chrome, Edge, Brave or Opera (`nissia browser detect`).
 
 ## Install
