@@ -90,6 +90,8 @@ async fn exec_line(
     match verb {
         "goto" => {
             let r = nissia_core::snap::execute(transport, Some(rest), None, lang, emu).await?;
+            // Human pause to take the page in before acting (pace-gated: 0 in Fast).
+            nissia_core::behavior::dwell_after_load().await;
             Ok(format!("(navigated, {} elements)", r.element_count))
         }
         "snap" => {

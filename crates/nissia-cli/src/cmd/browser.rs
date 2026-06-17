@@ -135,6 +135,66 @@ pub fn run_launch(
     Ok(())
 }
 
+/// Open the dedicated Agent profile VISIBLE so the user signs into their accounts
+/// ONCE; those sessions persist on disk in that profile and are reused by every
+/// later Agent-mode run. This is the "warm, logged-in profile" — the strongest
+/// anti-bot trust signal — done the only way Chrome 136+ still allows for CDP: a
+/// dedicated `--user-data-dir`, never the live Default profile (which Chrome 136
+/// refuses to expose over the debugging port).
+pub async fn run_login(
+    port: u16,
+    browser: Option<&str>,
+    profile: Option<&str>,
+    url: Option<&str>,
+    fmt: &str,
+) -> Result<()> {
+    let profile_name = profile.unwrap_or("agente");
+    // Login is always a visible Agent session → human pace for later commands.
+    nissia_core::behavior::save_pace(nissia_core::behavior::Pace::Human);
+    // Reuse the running window if there is one; otherwise launch it (visible,
+    // background, persistent dedicated profile).
+    let already = read_pid(port).is_some_and(is_process_alive);
+    if !already {
+        run_launch(
+            port,
+            false,
+            true,
+            Some(profile_name),
+            browser,
+            None,
+            None,
+            fmt,
+        )?;
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    }
+    // Open a sign-in start page and bring the window to the front.
+    let start = url.unwrap_or("https://www.google.com/");
+    if let Ok(transport) = nissia_cdp::connect(port).await {
+        let _ = transport.send(&nissia_cdp::commands::PageEnable {}).await;
+        let _ = transport
+            .send(&nissia_cdp::commands::PageNavigate {
+                url: start.to_string(),
+            })
+            .await;
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let _ = transport
+            .send(&nissia_cdp::commands::PageBringToFront {})
+            .await;
+    }
+    if fmt == "json" {
+        println!(
+            "{}",
+            serde_json::json!({"status": "login_window_open", "profile": profile_name, "port": port})
+        );
+    } else {
+        println!("Ventana de login abierta (perfil '{profile_name}').");
+        println!("Iniciá sesión en tus cuentas (Google, tiendas, etc.) en esa ventana.");
+        println!("Las sesiones quedan GUARDADAS en este perfil y se reutilizan en modo Agente — solo hace falta una vez.");
+        println!("Cuando termines podés dejar la ventana o cerrarla; los logins persisten.");
+    }
+    Ok(())
+}
+
 /// Spawn a background process that kills Chrome after `minutes` of inactivity.
 fn spawn_idle_watchdog(chrome_pid: u32, heartbeat_path: &std::path::Path, minutes: u32) {
     let timeout_secs = minutes as u64 * 60;

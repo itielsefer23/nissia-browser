@@ -39,7 +39,7 @@ installer prints the exact path.
 ## Commands
 
 ```bash
-nissia browser detect|default|launch|focus|stop|status   # detect/choose browser; focus = bring window to front
+nissia browser detect|default|launch|login|focus|stop|status   # detect/choose browser; focus=front; login=sign in once (warm profile)
 nissia browser launch --headless --background --idle-timeout 30
 nissia snap <url> [--focus "selector"]   # structure + @eN refs + section summaries
 nissia read [url] [--focus "selector"]   # page text as markdown
@@ -129,3 +129,19 @@ geo + timezone + language + UA must agree. Set them once on `launch` and every l
 Don't grab the first or cheapest. Rank by value: rating (≥4★/≥8.0) × number of reviews + reasonable price;
 filter non-negotiables first; present the top 3 + one recommendation with a short why. Ask ONE question only
 if the deciding criterion is genuinely ambiguous. Details and per-site recipes in `.nissia/recipes.md`.
+
+## Browse like a human (not a bot)
+- **Pace**: `--pace human|fast|protected` (global). Human = realistic mouse (curved + jitter + overshoot),
+  scroll inertia (and occasional up), typing rhythm, and a dwell after navigation — all NATIVE (0 tokens).
+  Default: visible launch = human, headless = fast; inherited from launch. Use `protected` on login/checkout.
+- **Operate sites like a person**: use the site's SEARCH box (type) or category, apply FILTERS one by one
+  (size/color/price) + SORT, scroll the listing for real, open 2-4 product pages and compare. Do NOT jump
+  straight to a product URL or `eval` the whole DOM blindly.
+- **Honest reporting**: only count what actually scrolled into the viewport, not the DOM. Say "scanned ~N of M",
+  never "saw M". (IntersectionObserver helper in `.nissia/recipes.md`.)
+- **Warm logged-in profile**: `nissia browser login` opens a dedicated profile to sign in ONCE; it persists and
+  is reused (and is the strongest anti-bot signal). Chrome 136 can't expose the live Default profile, hence a
+  dedicated one. Offer this to the user with the reason; don't force it.
+- **Buying** (only with the user's explicit OK AND payment already saved): variant → add to cart → checkout →
+  extract the order summary (item, total incl. shipping, address) → STOP and confirm with the user → only then
+  click Pay. NEVER type card numbers / CVV — the binary refuses those fields. See `.nissia/recipes.md`.

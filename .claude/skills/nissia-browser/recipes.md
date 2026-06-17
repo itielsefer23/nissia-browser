@@ -32,6 +32,12 @@ Las clases CSS de los sitios cambian seguido. No dependas de ellas. Dos caminos:
   hay un **ícono/toggle de lupa** que lo abre: clickealo primero
   (`clicksel 'button[aria-label*="search" i], button[aria-label*="buscar" i], .search-toggle, [data-testid*=search]'`),
   y DESPUÉS tipeá en el campo que quedó activo con **`typeactive <texto>`**. Enviá por botón (no Enter).
+- **VERIFICÁ EL FOCO tras clickear la caja** (clave, validado en Riachuelo): `eval document.activeElement.tagName`.
+  Si quedó `BODY` (no el INPUT), el campo NO se enfocó (colapsado/overlay/proxy) → typeactive va a fallar.
+  Hacé: (a) buscá+clickeá la lupa/toggle del header (arriba a la derecha) y reintentá; (b) si no aparece o
+  sigue en BODY, **caé directo a la URL de resultados del sitio** (`/busca?q=` / `/s?k=` / `/search?q=`).
+  No insistas tecleando en el vacío. Sitios con form muy dinámico (Google Flights) pueden colgar el
+  autocompletar: usá `waitfor [role=option]` y si no resuelve rápido, cambiá a un agregador/URL.
 - **No adivines selectores: DESCUBRÍ.** Para clickear un link/título que no conocés, listá por estructura
   (un humano mira y elige). Ej. titulares = links con texto de titular:
   ```js
@@ -154,6 +160,33 @@ Investigación: el rating + cantidad de reseñas pesa MÁS que el precio (88% co
    lo mejor puntuado vs lo más rápido), hacé **UNA pregunta corta** (`AskUserQuestion`). Si no, elegí
    "mejor valor" y explicá por qué (más barato en tokens). Conocés al usuario: usá eso para sesgar la elección.
 
+## Operar productos/servicios como HUMANO (no como bot) + reporte honesto
+El anti-patrón (NO lo hagas): ir directo a la URL del producto, no usar el buscador, no tocar filtros, casi
+no scrollear, `eval` todo el DOM y decir "vi 50 productos" cuando solo entraron 4 a la pantalla. Una persona
+NO hace eso. El flujo humano (en modo Agente, pace human):
+1. **Entrá a la home/categoría del sitio** (no deep-link salvo muro anti-bot) → `dismiss`.
+2. **Usá el BUSCADOR del sitio**: `clicksel <caja>` → `typeactive <consulta>` → enviar por **botón** (no Enter
+   salvo Google). O clic en la **categoría** (Hombre → Jeans). Una persona escribe o navega categorías; no teletransporta.
+3. **Interpretá el pedido y aplicá FILTROS uno por uno** (re-mirá los resultados entre cada uno): si el usuario
+   dio talle/color/precio/marca, mapealos a los filtros del sitio (chips/checkboxes/slider). Ej: Talle 48 → Color
+   oscuro → Precio. Y **orden** (dropdown): "menor precio" o "mejor evaluación". Si el pedido es simple, no sobre-filtres.
+4. **Scrolleá la lista DE VERDAD** (`scroll down` en ráfagas con pausa, no `eval` a ciegas). La gente escanea
+   ~1-2 pantallas / ~8-20 cards, no 50. Pausá en los que interesan.
+5. **Abrí 2-4 fichas candidatas** (no solo la 1ª): `clicksel`/`goto href`; en cada una `scroll read` y verificá lo
+   que pidió el usuario (talle disponible, color real, **envío a su ciudad/CEP**, precio, reseñas). Volvé con `back`.
+6. **Compará y elegí "mejor valor"** (ver sección anterior) → top 3 + recomendación con el porqué.
+
+**REPORTE HONESTO (obligatorio): contá solo lo que ENTRÓ a la pantalla, no el DOM entero.** Instalá un
+IntersectionObserver una vez, scrolleá, y leé cuántas cards realmente se vieron:
+```js
+// instalar sobre el selector de card del sitio (una vez, antes de scrollear)
+(function(s){window.__nzs=window.__nzs||new Set();if(!window.__nzio){window.__nzio=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)window.__nzs.add(e.target)})},{threshold:0.4})}document.querySelectorAll(s).forEach(function(el){window.__nzio.observe(el)});return document.querySelectorAll(s).length})('[class*=poly-card]')
+// ...hacé varios `scroll down` con pausa..., después leé:
+JSON.stringify({vistos:window.__nzs.size,total_en_dom:document.querySelectorAll('[class*=poly-card]').length})
+```
+Reportá: **"escaneé ~N de M listados"** (N=`vistos`), nunca "vi M". "Examiné/leí" solo lo que abriste o donde
+te detuviste. Si abriste 3 fichas, decí "miré 3 en detalle". La honestidad importa: no infles lo que viste.
+
 ## Recetas
 
 ### E-commerce (buscar producto, ver precios, abrir uno)
@@ -184,8 +217,26 @@ Igual que hoteles pero con origen+destino+fechas ida/vuelta. Ver el ejemplo en l
 
 ### Login / paywall (IMPORTANTE: no manejes credenciales)
 - Si el sitio pide iniciar sesión o hay paywall: **NO ingreses usuario/contraseña vos.** Frená y
-  pedile al usuario que se loguee (o que use `nissia session save` tras loguearse a mano, y luego
-  `session load`). Las credenciales nunca van al repo ni al contexto.
+  pedile al usuario que se loguee. Mejor: que use **`nissia browser login`** (abre el perfil dedicado
+  para loguearse una vez; queda guardado y se reusa en Agente). Las credenciales nunca van al repo ni al contexto.
+
+### Comprar (pago YA guardado + CONFIRMACIÓN final)
+Solo si **(a)** el usuario te autorizó EXPLÍCITAMENTE esta compra **y (b)** el pago + dirección YA están
+guardados (perfil logueado / cuenta del sitio). **NUNCA tipees número de tarjeta, CVV ni datos financieros**
+— el binario además los rechaza (`type`/`fill` se niegan en campos de tarjeta/CVV). Si falta el pago guardado
+→ **FRENÁ y pedíselo al usuario**, no ingreses datos. Flujo humano:
+1. Ficha: elegí variante (talle/color) y **VERIFICÁ que quedó la correcta antes de agregar** — leé el
+   valor seleccionado (ej. el `<select>` de talle o el botón activo) y compará con lo pedido; si agarró un
+   DEFAULT equivocado (ej. talle 46 en vez de 48) reseleccioná. Un talle/color mal elegido arruina la compra.
+   Recién con la variante correcta → `clicksel` "Agregar al carrito". (Validado: Amazon tomó 46 por default.)
+2. Carrito → revisá ítem / cantidad / precio.
+3. Iniciá checkout (sesión + pago + dirección ya guardados).
+4. **Extraé el RESUMEN** (ítem, cantidad, **total con impuestos+envío**, dirección, método de pago) con
+   `read --focus` del bloque resumen o `eval`.
+5. **PARÁ.** Mostrá el resumen y pedí OK con `AskUserQuestion`: "¿Confirmás: \<ítem\> — \<total\> — envío a \<dirección\>?".
+6. **Solo con el SÍ** → `clicksel` el botón final (Pagar / Confirmar pedido) y verificá la confirmación (nº de
+   pedido). Si dice no → no clickees; dejá el carrito listo para que cierre la persona.
+Nunca: crear cuentas, cambiar config de pago, ni aceptar términos por el usuario sin permiso.
 
 ### Feeds con scroll infinito / "cargar más"
 - `scroll read` carga contenido lazy mientras escanea (acotado ~5s). Para más, repetí `scroll down`

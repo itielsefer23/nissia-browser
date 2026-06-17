@@ -7,6 +7,8 @@
 use nissia_cdp::commands::{InputDispatchMouseEvent, RuntimeEvaluate};
 use nissia_cdp::CdpTransport;
 
+use crate::behavior;
+
 fn lcg(seed: &mut u64) -> u64 {
     *seed = seed
         .wrapping_mul(6364136223846793005)
@@ -73,7 +75,13 @@ async fn wheel(
                 ..Default::default()
             })
             .await?;
-        let pause = 14 + lcg(seed) % 26; // 14-40ms between ticks
+        // inter-tick pause = wheel inertia; scaled by pace (Fast → near-instant).
+        let f = behavior::Pace::current().factor();
+        let pause = if f <= 0.0 {
+            3
+        } else {
+            ((14 + lcg(seed) % 26) as f64 * f) as u64
+        };
         tokio::time::sleep(std::time::Duration::from_millis(pause)).await;
     }
     Ok(())
@@ -130,22 +138,32 @@ pub async fn execute_read(
     let started = std::time::Instant::now();
     let budget_ms = 5000; // hard cap: a quick scan, not a slow read
 
+    let f = behavior::Pace::current().factor();
     for i in 0..max {
         wheel(transport, step, &mut seed).await?;
 
         // Reading dwell: people SCAN (research: ~79% scan, ~16% read word-by-word).
         // A short glance at the top (title/intro), then quick scanning below.
-        let dwell = if i == 0 {
+        // Scaled by pace: Fast traverses to load lazy content without the wait.
+        let dwell_base = if i == 0 {
             450 + lcg(&mut seed) % 400 // ~0.45-0.85s
         } else {
             160 + lcg(&mut seed) % 240 // ~0.16-0.40s
         };
+        let dwell = if f <= 0.0 {
+            20
+        } else {
+            (dwell_base as f64 * f) as u64
+        };
         tokio::time::sleep(std::time::Duration::from_millis(dwell)).await;
 
-        // Occasional small scroll-back, like re-reading a line (~10%).
-        if lcg(&mut seed) % 100 < 10 {
+        // Occasional small scroll-back, like re-reading a line (~12%) — human paces only.
+        if f > 0.0 && lcg(&mut seed) % 100 < 12 {
             wheel(transport, -(vh * 0.15), &mut seed).await?;
-            tokio::time::sleep(std::time::Duration::from_millis(140 + lcg(&mut seed) % 200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(
+                ((140 + lcg(&mut seed) % 200) as f64 * f) as u64,
+            ))
+            .await;
         }
 
         // Close late-appearing overlays/ads/consent so reading isn't blocked

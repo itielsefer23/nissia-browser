@@ -1,4 +1,5 @@
 pub mod action;
+pub mod behavior;
 pub mod element_map;
 pub mod read;
 pub mod record;

@@ -20,7 +20,16 @@ fn build_extractor_js(focus_selector: Option<&str>) -> String {
     let root_expr = match focus_selector {
         Some(sel) => {
             let escaped = sel.replace('`', "\\`").replace('\\', "\\\\");
-            format!("document.querySelector(`{escaped}`) || document.body")
+            // When the selector matches several elements (e.g. a page with an
+            // embedded <article> card plus the real <article> body), pick the
+            // one with the most text instead of blindly taking the first match.
+            format!(
+                "(function(){{var ms=document.querySelectorAll(`{escaped}`);\
+if(!ms.length)return document.body;\
+var best=ms[0],bl=(best.innerText||'').length;\
+for(var i=1;i<ms.length;i++){{var l=(ms[i].innerText||'').length;if(l>bl){{bl=l;best=ms[i];}}}}\
+return best;}})()"
+            )
         }
         None => "document.body".to_string(),
     };

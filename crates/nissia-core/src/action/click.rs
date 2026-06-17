@@ -4,6 +4,7 @@ use nissia_cdp::commands::{DomGetBoxModel, InputDispatchMouseEvent, RuntimeEvalu
 use nissia_cdp::CdpTransport;
 use serde_json::Value;
 
+use crate::behavior;
 use crate::element_map::ElementMap;
 
 pub async fn execute(
@@ -222,22 +223,25 @@ async fn verify_marked(transport: &CdpTransport) -> Option<(bool, f64, f64)> {
 }
 
 /// Dispatch a trusted left click at viewport coordinates, preceded by a HUMAN
-/// mouse trajectory (curved Bézier path, eased velocity, jitter, micro-adjust).
-/// This is what anti-bot systems look at: a click with no prior mouse movement,
-/// or a straight teleport, is an instant tell. All of this runs inside the binary
-/// (native CDP calls), so it costs zero tokens and ~100-180ms.
+/// mouse trajectory and (in human paces) a brief settle + press-hold. Anti-bot
+/// systems score the trajectory: a click with no prior movement, a straight
+/// teleport, or a *perfectly clean* Bézier are all tells — so the path carries
+/// gaussian jitter, an occasional overshoot-and-correct and non-uniform velocity.
+/// All native CDP → zero tokens. In `Fast` pace the pauses collapse but the
+/// movement stays trusted.
 pub async fn human_click_at(
     transport: &CdpTransport,
     x: f64,
     y: f64,
 ) -> Result<(), nissia_cdp::CdpTransportError> {
     human_move(transport, x, y).await?;
+    let f = behavior::Pace::current().factor();
+    let mut seed = behavior::rng_seed();
     // settle, then a tiny micro-adjustment (humans rarely land dead-center)
-    let mut seed = rng_seed();
-    tokio::time::sleep(std::time::Duration::from_millis(50 + (seed >> 33) % 80)).await;
+    behavior::pause(60).await;
     let (mx, my) = (
-        x + (rand01(&mut seed) - 0.5) * 2.0,
-        y + (rand01(&mut seed) - 0.5) * 2.0,
+        x + (behavior::rand01(&mut seed) - 0.5) * 2.0,
+        y + (behavior::rand01(&mut seed) - 0.5) * 2.0,
     );
     let _ = transport
         .send(&InputDispatchMouseEvent {
@@ -249,7 +253,7 @@ pub async fn human_click_at(
             ..Default::default()
         })
         .await;
-    tokio::time::sleep(std::time::Duration::from_millis(20 + (seed >> 29) % 40)).await;
+    behavior::pause(35).await;
 
     transport
         .send(&InputDispatchMouseEvent {
@@ -261,7 +265,9 @@ pub async fn human_click_at(
             ..Default::default()
         })
         .await?;
-    tokio::time::sleep(std::time::Duration::from_millis(40 + (seed >> 25) % 70)).await;
+    // press→release hold: humans hold ~45-110ms; collapse in Fast.
+    let hold = if f > 0.0 { 45 + (seed >> 25) % 70 } else { 8 };
+    tokio::time::sleep(std::time::Duration::from_millis(hold)).await;
 
     transport
         .send(&InputDispatchMouseEvent {
@@ -278,36 +284,71 @@ pub async fn human_click_at(
     Ok(())
 }
 
-/// Move the mouse from its last known position to (tx,ty) along a curved,
-/// human-like path: cubic Bézier with random control points, ease-in-out
-/// velocity (slow→fast→slow, à la Fitts's law) and small per-step jitter.
+/// Move the mouse to (tx,ty) like a human: a curved Bézier base path with
+/// gaussian per-point jitter and ease-in-out velocity, plus an occasional
+/// overshoot-past-then-correct on longer moves (~35%). Delays scale with the
+/// active pace (0 in Fast). A *perfect* Bézier is now an instant anti-bot tell,
+/// hence the jitter + overshoot.
 pub async fn human_move(
     transport: &CdpTransport,
     tx: f64,
     ty: f64,
 ) -> Result<(), nissia_cdp::CdpTransportError> {
     let (sx, sy) = load_cursor();
-    let mut seed = rng_seed();
+    let f = behavior::Pace::current().factor();
+    let mut seed = behavior::rng_seed();
     let dist = ((tx - sx).powi(2) + (ty - sy).powi(2)).sqrt();
     if dist < 3.0 {
         return Ok(());
     }
-    // Control points: along the line at ~30%/70% plus a perpendicular wobble.
+    // ~35% of longer human moves overshoot the target then correct back.
+    if f > 0.0 && dist > 80.0 && behavior::rand01(&mut seed) < 0.35 {
+        let (ux, uy) = ((tx - sx) / dist, (ty - sy) / dist);
+        let over = 4.0 + behavior::rand01(&mut seed) * 11.0;
+        let (ox, oy) = (tx + ux * over, ty + uy * over);
+        glide(transport, sx, sy, ox, oy, &mut seed, f).await?;
+        behavior::pause(55).await;
+        let (cx, cy) = load_cursor();
+        glide(transport, cx, cy, tx, ty, &mut seed, f).await?;
+    } else {
+        glide(transport, sx, sy, tx, ty, &mut seed, f).await?;
+    }
+    save_cursor(tx, ty);
+    Ok(())
+}
+
+/// One curved glide from (sx,sy) to (tx,ty): cubic Bézier with a perpendicular
+/// wobble, gaussian per-point jitter and ease-in-out velocity. Pace `f` scales
+/// the inter-step delay (0 = no sleeps, fewer points).
+#[allow(clippy::too_many_arguments)]
+async fn glide(
+    transport: &CdpTransport,
+    sx: f64,
+    sy: f64,
+    tx: f64,
+    ty: f64,
+    seed: &mut u64,
+    f: f64,
+) -> Result<(), nissia_cdp::CdpTransportError> {
+    let dist = ((tx - sx).powi(2) + (ty - sy).powi(2)).sqrt();
+    if dist < 1.0 {
+        return Ok(());
+    }
     let (dx, dy) = (tx - sx, ty - sy);
     let (px, py) = (-dy / dist, dx / dist); // unit perpendicular
     let wobble = (dist * 0.18).min(90.0);
-    let off1 = (rand01(&mut seed) - 0.5) * 2.0 * wobble;
-    let off2 = (rand01(&mut seed) - 0.5) * 2.0 * wobble;
+    let off1 = (behavior::rand01(seed) - 0.5) * 2.0 * wobble;
+    let off2 = (behavior::rand01(seed) - 0.5) * 2.0 * wobble;
     let c1 = (sx + dx * 0.30 + px * off1, sy + dy * 0.30 + py * off1);
     let c2 = (sx + dx * 0.70 + px * off2, sy + dy * 0.70 + py * off2);
 
-    let steps = (dist / 8.0).clamp(14.0, 32.0) as u32;
+    let (lo, hi) = if f <= 0.0 { (6.0, 12.0) } else { (18.0, 60.0) };
+    let steps = (dist / 6.0).clamp(lo, hi) as u32;
+    let jstd = if f <= 0.0 { 0.3 } else { 1.1 };
     for i in 1..=steps {
         let t_lin = i as f64 / steps as f64;
-        // smoothstep easing → slow at the ends, fast in the middle
-        let t = t_lin * t_lin * (3.0 - 2.0 * t_lin);
+        let t = t_lin * t_lin * (3.0 - 2.0 * t_lin); // smoothstep ease-in-out
         let mt = 1.0 - t;
-        // cubic Bézier B(t)
         let bx = mt * mt * mt * sx
             + 3.0 * mt * mt * t * c1.0
             + 3.0 * mt * t * t * c2.0
@@ -316,8 +357,8 @@ pub async fn human_move(
             + 3.0 * mt * mt * t * c1.1
             + 3.0 * mt * t * t * c2.1
             + t * t * t * ty;
-        let jx = (rand01(&mut seed) - 0.5) * 1.4;
-        let jy = (rand01(&mut seed) - 0.5) * 1.4;
+        let jx = behavior::gauss(seed, 0.0, jstd);
+        let jy = behavior::gauss(seed, 0.0, jstd);
         transport
             .send(&InputDispatchMouseEvent {
                 event_type: "mouseMoved".to_string(),
@@ -328,29 +369,16 @@ pub async fn human_move(
                 ..Default::default()
             })
             .await?;
-        // faster in the middle, slower at the ends (1 - speed)
-        let speed = 1.0 - (2.0 * t_lin - 1.0).abs(); // 0..1..0
-        let delay = 3 + ((1.0 - speed) * 9.0) as u64;
-        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        if f > 0.0 {
+            let speed = 1.0 - (2.0 * t_lin - 1.0).abs(); // 0..1..0
+            let delay = ((3.0 + (1.0 - speed) * 9.0) * f) as u64;
+            if delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
+        }
     }
     save_cursor(tx, ty);
     Ok(())
-}
-
-fn rng_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x9E37_79B9_7F4A_7C15)
-        | 1
-}
-
-/// LCG → pseudo-random f64 in [0,1).
-fn rand01(seed: &mut u64) -> f64 {
-    *seed = seed
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    ((*seed >> 33) as f64) / (1u64 << 31) as f64
 }
 
 fn cursor_file() -> std::path::PathBuf {

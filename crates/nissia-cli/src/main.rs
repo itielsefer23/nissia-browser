@@ -40,6 +40,12 @@ struct Cli {
     #[arg(long, global = true)]
     timezone: Option<String>,
 
+    /// Behaviour pace: fast (minimal delays), human (realistic mouse/scroll/typing),
+    /// protected (extra-careful, for login/checkout/captcha pages). Default: inherited
+    /// from launch (visible Agent = human, headless = fast).
+    #[arg(long, global = true)]
+    pace: Option<String>,
+
     /// Override User-Agent string
     #[arg(long, global = true)]
     user_agent: Option<String>,
@@ -282,9 +288,14 @@ enum Commands {
         command: Option<String>,
     },
 
-    /// Write AGENTS.md to the current directory for AI coding agent skill discovery.
-    /// Run this once in your project to enable Claude Code, Codex, opencode, etc.
-    Init,
+    /// Write AGENTS.md + .nissia/recipes.md to the current directory for AI coding
+    /// agent skill discovery. Run this once to enable Claude Code, Codex, opencode, etc.
+    Init {
+        /// Overwrite existing AGENTS.md / .nissia/recipes.md (refresh them after a
+        /// nissia update so the on-disk docs match the new version).
+        #[arg(long)]
+        force: bool,
+    },
 
     /// Check whether a newer nissia is published (GitHub release). Cached 24h.
     /// `--check` is the cheap, quiet form for skill startup (prints only if an
@@ -356,6 +367,20 @@ enum BrowserAction {
         /// Recommended for AI agent sessions to prevent orphaned processes.
         #[arg(long)]
         idle_timeout: Option<u32>,
+    },
+    /// Open the dedicated Agent profile VISIBLE so you can sign into your accounts
+    /// ONCE. The sessions persist in that profile and are reused by every later
+    /// Agent-mode run (a warm, logged-in profile = the strongest anti-bot signal).
+    Login {
+        /// Which browser: chrome | edge | opera | brave | chromium (else default/auto).
+        #[arg(long)]
+        browser: Option<String>,
+        /// Profile name [default: "agente"] — the same one Agent mode uses.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Page to open for signing in [default: google.com].
+        #[arg(long)]
+        url: Option<String>,
     },
     /// Stop a running browser instance
     Stop,
@@ -534,6 +559,10 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         if cli.lang == "en-US" {
             cli.lang = sl;
         }
+    }
+    // Explicit --pace overrides the inherited session pace for this command.
+    if let Some(ref p) = cli.pace {
+        std::env::set_var("NISSIA_PACE", p);
     }
 
     match cli.command {
@@ -732,6 +761,18 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                 profile_path,
                 idle_timeout,
             } => {
+                // Persist the session pace so every later command inherits it:
+                // visible Agent → human, headless → fast (explicit --pace wins).
+                let pace = cli
+                    .pace
+                    .as_deref()
+                    .map(nissia_core::behavior::Pace::parse)
+                    .unwrap_or(if headless {
+                        nissia_core::behavior::Pace::Fast
+                    } else {
+                        nissia_core::behavior::Pace::Human
+                    });
+                nissia_core::behavior::save_pace(pace);
                 cmd::browser::run_launch(
                     cli.port,
                     headless,
@@ -742,6 +783,20 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                     idle_timeout,
                     fmt,
                 )?;
+            }
+            BrowserAction::Login {
+                browser,
+                profile,
+                url,
+            } => {
+                cmd::browser::run_login(
+                    cli.port,
+                    browser.as_deref(),
+                    profile.as_deref(),
+                    url.as_deref(),
+                    fmt,
+                )
+                .await?;
             }
             BrowserAction::Stop => {
                 cmd::browser::run_stop(cli.port, fmt)?;
@@ -793,7 +848,7 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
         Commands::Schema { command } => {
             cmd::schema::run(command.as_deref(), fmt);
         }
-        Commands::Init => {
+        Commands::Init { force } => {
             let mut created = Vec::new();
 
             // Create .nissia/ directory for project-scope workflows
@@ -803,19 +858,25 @@ async fn dispatch(cli: Cli, fmt: &str) -> anyhow::Result<()> {
                 created.push(".nissia/workflows/");
             }
 
-            // Create AGENTS.md for AI coding agent skill discovery
+            // Create AGENTS.md for AI coding agent skill discovery (--force refreshes it).
             let agent_path = std::path::Path::new("AGENTS.md");
-            if !agent_path.exists() {
+            if !agent_path.exists() || force {
                 let agent_md = include_str!("../../../AGENTS.md");
                 std::fs::write(agent_path, agent_md)?;
-                created.push("AGENTS.md");
+                created.push(if agent_path.exists() && force {
+                    "AGENTS.md (refreshed)"
+                } else {
+                    "AGENTS.md"
+                });
             }
 
             // Ship the deep recipes (anti-bot, human navigation, choosing the best,
             // per-site playbooks) so ANY agent — Codex, Cursor, opencode, not just
             // Claude Code — gets the same depth, not only the short AGENTS.md.
+            // --force refreshes it after a nissia update.
+            std::fs::create_dir_all(nissia_dir).ok();
             let recipes_path = nissia_dir.join("recipes.md");
-            if !recipes_path.exists() {
+            if !recipes_path.exists() || force {
                 let recipes_md = include_str!("../../../skills/nissia-browser/recipes.md");
                 std::fs::write(&recipes_path, recipes_md)?;
                 created.push(".nissia/recipes.md");

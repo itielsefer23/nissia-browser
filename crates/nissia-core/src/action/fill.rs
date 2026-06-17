@@ -41,18 +41,26 @@ pub async fn execute(
                 message: "Could not resolve element to remote object".into(),
             })?;
 
-    // Focus, clear, set value, and dispatch events
+    // Focus, clear, set value, and dispatch events — but FIRST refuse payment-card /
+    // CVV fields (entering card details is prohibited; using saved payment is fine).
     let js = r#"
         function(newValue) {
+            var ac = (this.getAttribute('autocomplete')||'').toLowerCase();
+            var hay = ((this.name||'')+' '+(this.id||'')+' '+(this.getAttribute('placeholder')||'')+' '+(this.getAttribute('aria-label')||'')).toLowerCase();
+            if (/cc-number|cc-csc|cc-exp/.test(ac) ||
+                /(card.?number|cardnum|creditcard|n[uú]mero.{0,6}(tarjeta|cart[aã]o)|\bcvv\b|\bcvc\b|security.?code|c[oó]digo.{0,6}segur|\bcsc\b)/.test(hay)) {
+                return '__NZ_FINANCIAL__';
+            }
             this.focus();
             this.value = '';
             this.value = newValue;
             this.dispatchEvent(new Event('input', { bubbles: true }));
             this.dispatchEvent(new Event('change', { bubbles: true }));
+            return 'ok';
         }
     "#;
 
-    transport
+    let r = transport
         .send(&RuntimeCallFunctionOn {
             function_declaration: js.to_string(),
             object_id: Some(object_id),
@@ -64,6 +72,16 @@ pub async fn execute(
             await_promise: None,
         })
         .await?;
+
+    if let Some(serde_json::Value::String(s)) = r.result.value {
+        if s == "__NZ_FINANCIAL__" {
+            return Err(nissia_cdp::CdpTransportError::CommandFailed {
+                method: "fill".into(),
+                code: -1,
+                message: "refusing to fill a payment-card / CVV field — entering card details is not allowed; ask the user to enter it themselves (use only payment methods already saved)".into(),
+            });
+        }
+    }
 
     Ok(())
 }

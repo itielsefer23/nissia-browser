@@ -73,10 +73,14 @@ nissia browser focus                                  # traela al frente (el usu
 
 - `--browser` acepta `chrome|edge|brave|opera|chromium`. `launch` sin `--browser` usa el
   default guardado, y si no hay, autodetecta.
-- **Perfil con tu sesión iniciada:** por defecto usa un perfil dedicado persistente (se "calienta"
-  con el uso: logueate una vez y queda). Para abrir directamente con tu perfil real logueado,
-  `nissia browser launch --profile-path "<carpeta del perfil>"` (ese navegador debe estar CERRADO).
-  Es además la mejor defensa anti-bot (sesión establecida con cookies).
+- **Perfil con tu sesión iniciada (OFRECELO y explicá el porqué — NO lo abras a ciegas):** Chrome
+  abre LIMPIO (sin tus cuentas) salvo que uses un perfil logueado. La 1ª vez en Agente, **preguntá con
+  `AskUserQuestion`** si querés iniciar sesión, explicando el beneficio: *"así uso tus cuentas ya iniciadas
+  (Google, tiendas) y además paso mucho mejor los anti-bots con un perfil 'caliente'"*. Si acepta:
+  **`nissia browser login`** (abre el perfil dedicado `agente` para que te loguees UNA vez; las sesiones
+  quedan guardadas y se reusan en Agente — Chrome 136 ya no deja manejar tu Default real, por eso es un
+  perfil dedicado). Si preferís no loguearte, sigue con el perfil limpio. (`--profile-path <dir>` sigue
+  disponible para apuntar a un user-data-dir propio, con ese navegador CERRADO.)
 - **`nissia browser focus`** trae la ventana al frente (CDP `Page.bringToFront`). Llamalo
   después de lanzar y otra vez antes de mostrar resultados, así el usuario VE lo que pasa
   (si no, la ventana puede quedar detrás de la terminal y "no se ve la búsqueda").
@@ -116,6 +120,15 @@ wait <ms>                  waitfor <css>     waitgone <css>
 3. **Elegí el MEJOR resultado, NO el primero** (comparás y decidís; ver "Elegir la MEJOR opción" en recipes.md).
 4. **Descubrí, no adivines** selectores (snap o finder de recipes.md); enviá búsquedas por BOTÓN (no Enter).
 5. Tenés `back` / `forward` / `reload` para moverte como humano. Usalos en vez de re-buscar de cero.
+6. **Productos/servicios = operá como humano**: usá el BUSCADOR del sitio (escribí) o categoría, aplicá
+   FILTROS uno por uno (talle/color/precio) + ORDEN, scrolleá la lista de verdad, abrí 2-4 fichas y
+   compará. NO vayas directo a la URL ni hagas `eval` a ciegas. Ver recipes.md "Operar productos/servicios como HUMANO".
+7. **REPORTE HONESTO**: contá solo lo que entró a la pantalla (viewport), no el DOM entero. Decí "escaneé ~N
+   de M", nunca "vi M". "Examiné" solo lo que abriste. (Helper IntersectionObserver en recipes.md.)
+8. **Comprar**: solo con pago YA guardado + tu OK explícito; extraé el resumen, PARÁ y confirmá antes de Pagar.
+   NUNCA tipees datos de tarjeta (el binario los rechaza). Ver recipes.md "Comprar (pago YA guardado + CONFIRMACIÓN)".
+9. **Ritmo (`--pace`)**: Agente = `human` (mouse/scroll/tecleo realistas), headless = `fast`. Se hereda del launch;
+   forzá con `--pace fast|human|protected` (protected = login/checkout/captcha, extra-cuidadoso). Todo nativo (0 tokens).
 
 Deducí el objetivo (explícito o implícito) y operá el sitio como una persona. Reglas que
 SÍ funcionan (aprendidas operando formularios reales tipo Google Flights):
@@ -193,9 +206,12 @@ A veces una página da error, carga a medias o queda en blanco. Como un humano: 
 (o `reload hard` sin caché) y reintentá una vez antes de rendirte. En `batch` es el verbo `reload`.
 
 ## 6. Sigilo (anti-bot) — integrado, y CÓMO NO parecer robot
-- Navegador real + perfil persistente + `navigator.webdriver = false`. nissia **no llama
-  `Runtime.enable`** (el tell #1 de CDP, lo que miran DataDome/Cloudflare vía `consoleAPICalled`;
-  confirmado en código 2026-06-16) y usa Chrome real (TLS/JA4 + canvas/WebGL genuinos) → buen sigilo de base.
+- **Verificado 2026-06-16 en bot.sannysoft: 0 banderas rojas / 31 tests OK** (webdriver missing, Chrome present,
+  plugins reales, WebGL real). El mouse humano (jitter+overshoot+velocidad variable), scroll con inercia/arriba,
+  tecleo con ritmo y `dwell` tras navegar son NATIVOS (0 tokens) y adaptativos por `--pace`.
+- Navegador real + perfil persistente/caliente (`nissia browser login`) + `navigator.webdriver = false`. nissia
+  **no llama `Runtime.enable`** (el tell #1 de CDP, lo que miran DataDome/Cloudflare vía `consoleAPICalled`;
+  confirmado en código) y usa Chrome real (TLS/JA4 + canvas/WebGL genuinos) → buen sigilo de base.
 - **CONSISTENCIA = lo #1 que chequean (capas combinadas).** geo + timezone + idioma + UA tienen que
   COINCIDIR (un geo en Rio con timezone de New York = bandera roja). nissia ahora setea
   `Emulation.setTimezoneOverride` y arregla `navigator.language`/`languages` (lista limpia, sin `;q=`).
@@ -243,7 +259,9 @@ A veces una página da error, carga a medias o queda en blanco. Como un humano: 
 ## 8. Comandos
 ```bash
 nissia search "<q>" [--n N] [--read] [--browser] [--open N]
-nissia browser detect|default|launch|focus|stop|status   nissia batch   nissia update [--check]
+nissia browser detect|default|launch|login|focus|stop|status   nissia batch   nissia update [--check]
+nissia browser login   # perfil dedicado para iniciar sesión 1 vez (warm, reusado en Agente)
+[--pace fast|human|protected] global   # ritmo de comportamiento humano (default: Agente=human, headless=fast)
 nissia snap <url> [--focus sel]   nissia read [url] [--focus sel]   nissia eval "<js>"
 nissia click @e1 [--no-snap]   nissia click --sel "<css>"   nissia fill @e1 "v"
 nissia type @e1 "t"   nissia select @e1 "v"   nissia key enter|tab|arrowdown|…
